@@ -150,6 +150,44 @@ export async function changePassword(userId, newPassword) {
     .eq('id', userId);
 }
 
+// ─── Admin: Reset password for any user ───────────────────────
+export async function adminResetPassword(userId) {
+  const tempPassword = randChars(8) + '@1';
+  await supabase
+    .from('users')
+    .update({ password: tempPassword, password_reset: true, updated_at: nowIso() })
+    .eq('id', userId);
+  await supabase.from('password_resets').insert({
+    id: genId(),
+    user_id: userId,
+    temp_password: tempPassword,
+    used: false,
+  });
+  return { tempPassword };
+}
+
+// ─── Admin: Set a specific new password for any user ──────────
+export async function adminSetPassword(userId, newPassword) {
+  await supabase
+    .from('users')
+    .update({ password: newPassword, password_reset: false, updated_at: nowIso() })
+    .eq('id', userId);
+  return { success: true };
+}
+
+// ─── Admin: Toggle user active status ─────────────────────────
+export async function adminToggleUserStatus(userId, status) {
+  await supabase
+    .from('users')
+    .update({ status, updated_at: nowIso() })
+    .eq('id', userId);
+  // Also sync to employees table if linked
+  await supabase
+    .from('employees')
+    .update({ status, updated_at: nowIso() })
+    .eq('user_id', userId);
+}
+
 // ─── Employee Registration ─────────────────────────────────────
 export async function registerEmployee(profile) {
   // Check duplicate email
@@ -193,6 +231,141 @@ export async function registerEmployee(profile) {
 
   const newUser = { id: userId, role: 'employee', email: profile.email.trim(), name: profile.name };
   return { success: true, user: newUser };
+}
+
+// ─── Admin: Create employee with auto-generated password ───────
+export async function adminCreateEmployee(profile) {
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .ilike('email', profile.email.trim())
+    .maybeSingle();
+
+  if (existing) return { success: false, error: 'Email already registered.' };
+
+  const userId    = genId();
+  const empId     = genId();
+  const empNum    = 'EMP-' + Date.now().toString().slice(-6);
+  const tempPass  = (profile.name || 'user').split(' ')[0].toLowerCase() + '@360';
+
+  const { error: ue } = await supabase.from('users').insert({
+    id: userId,
+    role: 'employee',
+    email: profile.email.trim(),
+    password: tempPass,
+    name: profile.name,
+    password_reset: true,   // force change on first login
+  });
+  if (ue) return { success: false, error: ue.message };
+
+  const { error: ee } = await supabase.from('employees').insert({
+    id: empId,
+    user_id: userId,
+    employee_id: empNum,
+    name: profile.name,
+    email: profile.email.trim(),
+    job_title: profile.jobTitle || null,
+    department: profile.department || null,
+    level: profile.level || null,
+    organization: profile.organization || null,
+    phone: profile.phone || null,
+    location: profile.location || null,
+    manager: profile.manager || null,
+    status: 'active',
+  });
+  if (ee) {
+    // Rollback user
+    await supabase.from('users').delete().eq('id', userId);
+    return { success: false, error: ee.message };
+  }
+
+  return { success: true, tempPassword: tempPass, employeeId: empNum };
+}
+
+// ─── Admin: Create reviewer directly (without nomination flow) ──
+export async function adminCreateReviewer(profile) {
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .ilike('email', profile.email.trim())
+    .maybeSingle();
+
+  if (existing) return { success: false, error: 'Email already registered.' };
+
+  const userId   = genId();
+  const revId    = genId();
+  const nomId    = genId();
+  const tempPass = (profile.name || 'reviewer').split(' ')[0].toLowerCase() + '@360';
+
+  const { error: ue } = await supabase.from('users').insert({
+    id: userId,
+    role: 'reviewer',
+    email: profile.email.trim(),
+    password: tempPass,
+    name: profile.name,
+    password_reset: true,
+  });
+  if (ue) return { success: false, error: ue.message };
+
+  // Create a nomination record (admin-created, auto-approved)
+  const { error: ne } = await supabase.from('nominations').insert({
+    id: nomId,
+    employee_id: profile.employeeId,
+    assignment_id: profile.assignmentId || null,
+    reviewer_type: profile.category || 'peer',
+    name: profile.name,
+    role: profile.role || null,
+    department: profile.department || null,
+    designation: profile.designation || null,
+    email: profile.email.trim(),
+    phone: profile.phone || null,
+    approval_status: 'approved',
+  });
+  if (ne) {
+    await supabase.from('users').delete().eq('id', userId);
+    return { success: false, error: ne.message };
+  }
+
+  const { error: re } = await supabase.from('reviewers').insert({
+    id: revId,
+    user_id: userId,
+    nomination_id: nomId,
+    employee_id: profile.employeeId,
+    temp_password: tempPass,
+  });
+  if (re) {
+    await supabase.from('users').delete().eq('id', userId);
+    await supabase.from('nominations').delete().eq('id', nomId);
+    return { success: false, error: re.message };
+  }
+
+  return { success: true, tempPassword: tempPass };
+}
+
+// ─── Admin: Get user info linked to employee ───────────────────
+export async function getUserByEmployeeId(empId) {
+  const { data: emp } = await supabase
+    .from('employees')
+    .select('user_id')
+    .eq('id', empId)
+    .maybeSingle();
+  if (!emp?.user_id) return null;
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', emp.user_id)
+    .maybeSingle();
+  return user || null;
+}
+
+// ─── Admin: Get user info linked to reviewer nomination ────────
+export async function getUserByNominationId(nomId) {
+  const { data: rev } = await supabase
+    .from('reviewers')
+    .select('user_id, users(*)')
+    .eq('nomination_id', nomId)
+    .maybeSingle();
+  return rev?.users || null;
 }
 
 export async function getEmployeeByUserId(userId) {
@@ -792,6 +965,30 @@ export async function updateReviewer(nominationId, updates) {
   if (updates.phone)       row.phone = updates.phone;
   row.updated_at = nowIso();
   await supabase.from('nominations').update(row).eq('id', nominationId);
+}
+
+// ─── Admin: Activate / Deactivate reviewer ─────────────────────
+// status: 'approved' = active, 'rejected' = deactivated
+export async function setReviewerStatus(nominationId, status) {
+  await supabase
+    .from('nominations')
+    .update({ approval_status: status, updated_at: nowIso() })
+    .eq('id', nominationId);
+
+  // Also sync user account status
+  const { data: rev } = await supabase
+    .from('reviewers')
+    .select('user_id')
+    .eq('nomination_id', nominationId)
+    .maybeSingle();
+
+  if (rev?.user_id) {
+    const userStatus = status === 'approved' ? 'active' : 'inactive';
+    await supabase
+      .from('users')
+      .update({ status: userStatus, updated_at: nowIso() })
+      .eq('id', rev.user_id);
+  }
 }
 
 export async function getReviewerByUserId(userId) {
