@@ -75,6 +75,25 @@ export async function initDb() {
         }
       }
     }
+
+    // Seed default assessment template
+    const defaultTemplateId = '00000000-0000-0000-0000-000000000002';
+    await supabase.from('assessment_templates').insert({
+      id: defaultTemplateId,
+      name: 'Standard Assessment',
+      description: 'Default 360° Power Skills assessment for all employees',
+      is_default: true,
+      target_levels: [],
+      target_departments: [],
+      active: true,
+    });
+    const sectionLinks = DEFAULT_SECTIONS.map((sec, i) => ({
+      id: genId(),
+      template_id: defaultTemplateId,
+      section_id: sec.id,
+      order_index: i,
+    }));
+    await supabase.from('assessment_template_sections').insert(sectionLinks);
   }
 }
 
@@ -304,8 +323,163 @@ export async function saveTemplates(templates) {
 }
 
 export async function getTemplateForEmployee(employee) {
-  // For now: return all sections (future: filter by template assignment)
+  if (!employee?.id) return getTemplates();
+
+  // Check if employee has a custom template assigned via assessment_templates
+  const { data: assignedTemplate, error: atError } = await supabase
+    .from('assessment_templates')
+    .select('*, assessment_template_sections(section_id)')
+    .eq('id', employee.templateId || '')
+    .maybeSingle();
+
+  if (atError) {
+    // Tables may not exist yet
+    return getTemplates();
+  }
+
+  if (assignedTemplate && assignedTemplate.assessment_template_sections?.length > 0) {
+    const sectionIds = assignedTemplate.assessment_template_sections.map(s => s.section_id);
+    const { data: sections } = await supabase
+      .from('template_sections')
+      .select('*, template_statements(*)')
+      .in('id', sectionIds)
+      .eq('active', true)
+      .order('order_index', { ascending: true });
+
+    return (sections || []).map(sec => ({
+      id: sec.id,
+      title: sec.name,
+      description: sec.description,
+      selfTip: sec.self_tip,
+      reviewerTip: sec.reviewer_tip,
+      statements: ((sec.template_statements || [])
+        .sort((a, b) => a.order_index - b.order_index))
+        .map(st => ({
+          id: st.id,
+          text: st.text,
+          selfTip: st.self_tip,
+          reviewerTip: st.reviewer_tip,
+        })),
+    }));
+  }
+
+  // Try level/department based template matching
+  if (employee.level || employee.department) {
+    const { data: templates, error: tmplError } = await supabase
+      .from('assessment_templates')
+      .select('*, assessment_template_sections(section_id)')
+      .eq('active', true);
+
+    if (tmplError) return getTemplates();
+
+    const matchedTemplate = (templates || []).find(t => {
+      const levels = t.target_levels ? t.target_levels : [];
+      const depts  = t.target_departments ? t.target_departments : [];
+      const levelMatch = levels.length === 0 || levels.includes(employee.level);
+      const deptMatch  = depts.length === 0  || depts.includes(employee.department);
+      return levelMatch && deptMatch && !t.is_default;
+    });
+
+    if (matchedTemplate && matchedTemplate.assessment_template_sections?.length > 0) {
+      const sectionIds = matchedTemplate.assessment_template_sections.map(s => s.section_id);
+      const { data: sections } = await supabase
+        .from('template_sections')
+        .select('*, template_statements(*)')
+        .in('id', sectionIds)
+        .eq('active', true)
+        .order('order_index', { ascending: true });
+
+      return (sections || []).map(sec => ({
+        id: sec.id,
+        title: sec.name,
+        description: sec.description,
+        selfTip: sec.self_tip,
+        reviewerTip: sec.reviewer_tip,
+        statements: ((sec.template_statements || [])
+          .sort((a, b) => a.order_index - b.order_index))
+          .map(st => ({
+            id: st.id,
+            text: st.text,
+            selfTip: st.self_tip,
+            reviewerTip: st.reviewer_tip,
+          })),
+      }));
+    }
+  }
+
+  // Fallback: return all active sections
   return getTemplates();
+}
+
+// ─── Assessment Templates (multi-template management) ──────────
+export async function getAssessmentTemplates() {
+  const { data: templates, error } = await supabase
+    .from('assessment_templates')
+    .select('*, assessment_template_sections(section_id)')
+    .eq('active', true)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    // Table may not exist yet; return empty array gracefully
+    console.warn('assessment_templates table not found:', error.message);
+    return [];
+  }
+
+  const allSections = await getTemplates();
+
+  return (templates || []).map(t => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    isDefault: t.is_default,
+    targetLevels: t.target_levels || [],
+    targetDepartments: t.target_departments || [],
+    sectionIds: (t.assessment_template_sections || []).map(s => s.section_id),
+    sections: allSections.filter(s =>
+      (t.assessment_template_sections || []).some(ts => ts.section_id === s.id)
+    ),
+    createdAt: t.created_at,
+    updatedAt: t.updated_at,
+  }));
+}
+
+export async function saveAssessmentTemplates(templates) {
+  if (!templates || templates.length === 0) return;
+  for (const tmpl of templates) {
+    const row = {
+      name: tmpl.name,
+      description: tmpl.description || null,
+      is_default: tmpl.isDefault || false,
+      target_levels: tmpl.targetLevels || [],
+      target_departments: tmpl.targetDepartments || [],
+      active: true,
+      updated_at: nowIso(),
+    };
+
+    if (tmpl.id) {
+      await supabase.from('assessment_templates').update(row).eq('id', tmpl.id);
+      // Re-sync section links
+      await supabase.from('assessment_template_sections').delete().eq('template_id', tmpl.id);
+    } else {
+      tmpl.id = genId();
+      await supabase.from('assessment_templates').insert({ id: tmpl.id, ...row, created_at: nowIso() });
+    }
+    // Insert section links
+    if (tmpl.sectionIds && tmpl.sectionIds.length > 0) {
+      const sectionRows = tmpl.sectionIds.map((sid, i) => ({
+        id: genId(),
+        template_id: tmpl.id,
+        section_id: sid,
+        order_index: i,
+      }));
+      await supabase.from('assessment_template_sections').insert(sectionRows);
+    }
+  }
+}
+
+export async function deleteAssessmentTemplate(templateId) {
+  await supabase.from('assessment_template_sections').delete().eq('template_id', templateId);
+  await supabase.from('assessment_templates').delete().eq('id', templateId);
 }
 
 // ─── Self-Assessment ───────────────────────────────────────────

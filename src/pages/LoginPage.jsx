@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Star, Eye, EyeOff, AlertCircle, Mail, KeyRound, CheckCircle, ArrowLeft, Copy } from 'lucide-react';
+import { Star, Eye, EyeOff, AlertCircle, Mail, KeyRound, CheckCircle, ArrowLeft, Copy, Shield } from 'lucide-react';
 import { authenticate, requestPasswordReset, changePassword } from '../lib/supabase';
 import { useApp } from '../store/AppContext';
 import { Button, Input, Alert, Divider } from '../components/UI';
@@ -38,13 +38,21 @@ function ForgotPassword({ onBack }) {
             <KeyRound size={20} className="text-indigo-600" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-gray-800">Forgot Password</h2>
-            <p className="text-xs text-gray-500">Enter your registered email address</p>
+            <h2 className="text-lg font-bold text-gray-800">Reset Password</h2>
+            <p className="text-xs text-gray-500">Enter your registered email address to receive a reset link</p>
           </div>
         </div>
 
         {!result ? (
           <form onSubmit={handleRequest} className="space-y-4">
+            <Alert type="info" className="mb-2">
+              <div className="flex items-start gap-2">
+                <Shield size={14} className="mt-0.5 flex-shrink-0" />
+                <span className="text-xs">
+                  A temporary password will be generated and sent to your email. In production, this would trigger an automated email delivery. Use the temporary password to sign in, then set a new password immediately.
+                </span>
+              </div>
+            </Alert>
             <Input
               label="Registered Email Address"
               type="email"
@@ -54,47 +62,51 @@ function ForgotPassword({ onBack }) {
               required
             />
             <Button type="submit" className="w-full" size="lg" disabled={loading || !email.trim()}>
-              {loading ? 'Sending…' : <><Mail size={16} /> Send Password Reset</>}
+              {loading ? 'Processing…' : <><Mail size={16} /> Send Reset Email</>}
             </Button>
           </form>
         ) : result.success ? (
           <div>
-            {/* Simulated email preview */}
+            {/* Success banner */}
             <Alert type="success" className="mb-5">
               <div className="flex items-center gap-2 font-medium mb-1">
-                <CheckCircle size={15} /> Password reset email sent to <strong>{result.email}</strong>
+                <CheckCircle size={15} /> Reset email sent to <strong>{result.email}</strong>
               </div>
               <p className="text-xs mt-1 text-emerald-700">
-                In a production environment this would be delivered to your inbox. Since this is a demo, your temporary password is shown below.
+                In production, a secure reset link would be delivered to your inbox. Below is your temporary password for immediate access.
               </p>
             </Alert>
 
-            {/* Simulated email card */}
-            <div className="border-2 border-dashed border-gray-200 rounded-2xl p-5 mb-5 bg-gray-50">
-              <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200">
-                <Mail size={15} className="text-gray-400" />
+            {/* Simulated email preview */}
+            <div className="border-2 border-dashed border-indigo-200 rounded-2xl p-5 mb-5 bg-indigo-50/30">
+              <div className="flex items-center gap-2 mb-3 pb-2 border-b border-indigo-100">
+                <Mail size={14} className="text-indigo-400" />
                 <div className="text-xs text-gray-500">
-                  <span className="font-semibold">To:</span> {result.email} &nbsp;|&nbsp;
-                  <span className="font-semibold">Subject:</span> Your 360° Assessment Tool — Temporary Password
+                  <span className="font-semibold text-gray-600">To:</span> {result.email} &nbsp;·&nbsp;
+                  <span className="font-semibold text-gray-600">Subject:</span> Your 360° Assessment — Password Reset
                 </div>
               </div>
               <p className="text-sm text-gray-700 mb-3">Dear <strong>{result.name}</strong>,</p>
               <p className="text-sm text-gray-600 mb-4">
-                We received a request to reset your password for the <strong>360° Assessment Tool</strong>. Your temporary password is:
+                We received a request to reset your password for the <strong>360° Assessment Tool</strong>. Use the temporary password below to sign in:
               </p>
-              <div className="flex items-center justify-between bg-white border-2 border-indigo-200 rounded-xl px-4 py-3 mb-4">
+              <div className="flex items-center justify-between bg-white border-2 border-indigo-300 rounded-xl px-4 py-3 mb-4 shadow-sm">
                 <code className="text-lg font-bold tracking-widest text-indigo-700">{result.tempPassword}</code>
                 <button onClick={copyPassword}
-                  className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium ml-3 transition-colors">
-                  {copied ? <><CheckCircle size={13} /> Copied!</> : <><Copy size={13} /> Copy</>}
+                  className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium ml-3 transition-colors px-2 py-1 rounded-lg hover:bg-indigo-50">
+                  {copied ? <><CheckCircle size={13} className="text-emerald-600" /> Copied!</> : <><Copy size={13} /> Copy</>}
                 </button>
               </div>
-              <p className="text-xs text-gray-500">
-                Please sign in using this temporary password. You will be prompted to set a new password after logging in.
-                This temporary password is valid for 24 hours.
-              </p>
-              <p className="text-xs text-gray-400 mt-3 border-t border-gray-200 pt-3">
-                If you did not request this, please contact your System Administrator immediately.
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3">
+                <p className="text-xs text-amber-800 font-medium">⚠ Important:</p>
+                <ul className="text-xs text-amber-700 mt-1 space-y-0.5 list-disc list-inside">
+                  <li>Use this temporary password to sign in immediately</li>
+                  <li>You will be prompted to set a new password upon login</li>
+                  <li>This temporary password expires in 24 hours</li>
+                </ul>
+              </div>
+              <p className="text-xs text-gray-400 border-t border-indigo-100 pt-3">
+                If you did not request this reset, please contact your System Administrator immediately.
               </p>
             </div>
 
@@ -174,7 +186,7 @@ export default function LoginPage({ onRegister }) {
     const user = await authenticate(form.email.trim(), form.password);
     if (!user) { setError('Invalid email or password. Please try again.'); setLoading(false); return; }
     // If password was reset, show change password prompt first
-    if (user.passwordReset) {
+    if (user.passwordReset || user.password_reset) {
       setLoggedInUser(user);
       setLoading(false);
       return;

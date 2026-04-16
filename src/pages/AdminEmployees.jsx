@@ -269,7 +269,10 @@ export default function AdminEmployees() {
 
   return (
     <div>
-      <PageHeader title="Employee Management" subtitle="View, edit, and manage all registered employee profiles." />
+      <PageHeader
+        title="Employee Management"
+        subtitle="View, edit, and manage registered employee profiles. Employees self-register via the portal."
+      />
 
       {notification && (
         <Alert type="success" className="mb-4"><div className="flex items-center gap-2"><CheckCircle size={14} />{notification}</div></Alert>

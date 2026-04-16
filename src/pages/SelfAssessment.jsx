@@ -221,18 +221,26 @@ export default function SelfAssessment({ onNavigate }) {
 
 // ─── Statement Row Component ──────────────────────────────────
 function StatementRow({ index, statement, currentRating, onRate, isSelf }) {
-  const scale = isSelf ? RATING_SCALE : [...RATING_SCALE, { value: 0, label: 'Not Observed', short: 'N/O', bg: 'bg-gray-50', textColor: 'text-gray-500', border: 'border-gray-300', color: 'bg-gray-300' }];
+  const scale = isSelf
+    ? RATING_SCALE
+    : [...RATING_SCALE, { value: 0, label: 'Not Observed / Unable to Rate', short: 'N/O', bg: 'bg-gray-50', textColor: 'text-gray-500', border: 'border-gray-300', color: 'bg-gray-300' }];
   const rated = currentRating !== undefined;
   const ratingObj = rated ? scale.find(r => r.value === currentRating) : null;
+
+  // Build statement text based on perspective
+  const statementText = isSelf
+    ? `I ${statement.text.charAt(0).toLowerCase() + statement.text.slice(1)}`
+    : statement.text.charAt(0).toUpperCase() + statement.text.slice(1);
 
   return (
     <div className={`p-4 rounded-xl border transition-all ${rated ? 'border-indigo-100 bg-indigo-50/40' : 'border-gray-200 bg-white'}`}>
       <div className="flex items-start gap-3 mb-3">
         <span className="text-xs font-bold text-gray-400 w-6 flex-shrink-0 mt-0.5">{index}.</span>
         <div className="flex-1">
-          <p className="text-sm text-gray-800 font-medium leading-snug">
-            {isSelf ? `I ${statement.text.charAt(0).toLowerCase() + statement.text.slice(1)}` : statement.text}
-          </p>
+          <p className="text-sm text-gray-800 font-medium leading-snug">{statementText}</p>
+          {statement.selfTip && isSelf && (
+            <p className="text-xs text-indigo-600 mt-1 italic">{statement.selfTip}</p>
+          )}
         </div>
         {ratingObj && (
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${ratingObj.bg} ${ratingObj.textColor} border ${ratingObj.border}`}>

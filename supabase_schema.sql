@@ -149,17 +149,42 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── Assessment Templates (multi-template support) ──────────────
+-- Each template defines a set of sections for a specific audience
+CREATE TABLE IF NOT EXISTS assessment_templates (
+  id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name                TEXT NOT NULL,
+  description         TEXT,
+  is_default          BOOLEAN DEFAULT FALSE,
+  target_levels       TEXT[] DEFAULT '{}',
+  target_departments  TEXT[] DEFAULT '{}',
+  active              BOOLEAN DEFAULT TRUE,
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── Assessment Template Sections (which sections belong to which template)
+CREATE TABLE IF NOT EXISTS assessment_template_sections (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  template_id  UUID REFERENCES assessment_templates(id) ON DELETE CASCADE,
+  section_id   UUID REFERENCES template_sections(id) ON DELETE CASCADE,
+  order_index  INTEGER DEFAULT 0,
+  UNIQUE(template_id, section_id)
+);
+
 -- ── Row Level Security (allow all via anon key) ────────────────
-ALTER TABLE users              ENABLE ROW LEVEL SECURITY;
-ALTER TABLE employees          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE template_sections  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE template_statements ENABLE ROW LEVEL SECURITY;
-ALTER TABLE assessments        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE assignments        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE nominations        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reviewers          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reviews            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE password_resets    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users                       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employees                   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE template_sections           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE template_statements         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assessments                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assignments                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE nominations                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reviewers                   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reviews                     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE password_resets             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assessment_templates        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assessment_template_sections ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "allow_all" ON users;
 DROP POLICY IF EXISTS "allow_all" ON employees;
@@ -171,17 +196,21 @@ DROP POLICY IF EXISTS "allow_all" ON nominations;
 DROP POLICY IF EXISTS "allow_all" ON reviewers;
 DROP POLICY IF EXISTS "allow_all" ON reviews;
 DROP POLICY IF EXISTS "allow_all" ON password_resets;
+DROP POLICY IF EXISTS "allow_all" ON assessment_templates;
+DROP POLICY IF EXISTS "allow_all" ON assessment_template_sections;
 
-CREATE POLICY "allow_all" ON users              FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON employees          FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON template_sections  FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON template_statements FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON assessments        FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON assignments        FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON nominations        FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON reviewers          FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON reviews            FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON password_resets    FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON users                       FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON employees                   FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON template_sections           FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON template_statements         FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON assessments                 FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON assignments                 FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON nominations                 FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON reviewers                   FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON reviews                     FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON password_resets             FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON assessment_templates        FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON assessment_template_sections FOR ALL USING (true) WITH CHECK (true);
 
 -- ── Seed Admin ─────────────────────────────────────────────────
 INSERT INTO users (id, email, password, role, name)
