@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Star, ArrowLeft, CheckCircle } from 'lucide-react';
-import { registerEmployee } from '../store/db';
+import { registerEmployee } from '../lib/supabase';
 import { useApp } from '../store/AppContext';
 import { Button, Input, Select, Alert } from '../components/UI';
 
@@ -52,8 +52,7 @@ export default function RegisterPage({ onBack }) {
     if (!validateStep2()) return;
     setLoading(true);
     setServerError('');
-    await new Promise(r => setTimeout(r, 500));
-    const result = registerEmployee(form);
+    const result = await registerEmployee(form);
     if (!result.success) { setServerError(result.error); setLoading(false); return; }
     setStep(3);
     setLoading(false);

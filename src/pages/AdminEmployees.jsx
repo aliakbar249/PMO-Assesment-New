@@ -1,18 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import {
-  getAllEmployees, updateEmployee, updateEmployeeStatus,
-  updateUserByEmployeeId, getAssessment, getAssignmentsByEmployee,
+  getAllEmployees, updateEmployee, getAssessment, getAssignmentsByEmployee,
   getNominations, getAllReviewers
-} from '../store/db';
+} from '../lib/supabase';
 import {
   Button, Card, Input, Select, Alert, Badge, PageHeader,
-  Modal, ProgressBar, EmptyState
+  Modal, EmptyState
 } from '../components/UI';
 import {
   Users, Edit3, Eye, UserCheck, UserX, Search,
-  CheckCircle, Clock, AlertCircle, ChevronDown, ChevronUp,
-  Briefcase, Star, Mail, Phone, Building2, KeyRound
+  CheckCircle, Clock, AlertCircle, Briefcase, Star, Mail, Phone, Building2
 } from 'lucide-react';
 
 const DEPARTMENTS = ['Engineering', 'Project Management', 'Operations', 'Finance', 'HR', 'Sales', 'Marketing', 'IT', 'Legal', 'Procurement', 'Other'];
@@ -25,36 +23,42 @@ const STATUS_CONFIG = {
   suspended: { label: 'Suspended', variant: 'danger',  icon: UserX },
 };
 
-// ─── Detail/Edit Modal ─────────────────────────────────────────
 function EmployeeModal({ employee, onSave, onClose }) {
-  const [tab, setTab]   = useState('details'); // 'details' | 'assessment' | 'edit'
-  const [form, setForm] = useState({ ...employee });
-  const [saved, setSaved] = useState(false);
-  const { refresh } = useApp();
+  const [tab,         setTab]         = useState('details');
+  const [form,        setForm]        = useState({ ...employee });
+  const [saved,       setSaved]       = useState(false);
+  const [assessment,  setAssessment]  = useState(null);
+  const [assignments, setAssignments] = useState([]);
+  const [nominations, setNominations] = useState(null);
+  const [reviewers,   setReviewers]   = useState([]);
 
-  const assessment  = useMemo(() => getAssessment(employee.id), [employee]);
-  const assignments = useMemo(() => getAssignmentsByEmployee(employee.id), [employee]);
-  const nominations = useMemo(() => getNominations(employee.id), [employee]);
-  const reviewers   = useMemo(() => getAllReviewers().filter(r => r.forEmployeeId === employee.id), [employee]);
+  useEffect(() => {
+    Promise.all([
+      getAssessment(employee.id),
+      getAssignmentsByEmployee(employee.id),
+      getNominations(employee.id),
+      getAllReviewers(),
+    ]).then(([a, asgns, noms, revs]) => {
+      setAssessment(a);
+      setAssignments(asgns || []);
+      setNominations(noms);
+      setReviewers((revs || []).filter(r => r.employeeId === employee.id));
+    });
+  }, [employee.id]);
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
-  const handleSave = () => {
-    onSave(employee.id, form);
+  const handleSave = async () => {
+    await onSave(employee.id, form);
     setSaved(true);
     setTimeout(() => { setSaved(false); setTab('details'); }, 1500);
   };
 
-  const approvedRevs  = reviewers.filter(r => r.status === 'approved');
-  const pendingRevs   = reviewers.filter(r => r.status === 'pending');
-  const completedRevs = reviewers.filter(r => {
-    // check if review submitted
-    return r.status === 'approved';
-  });
+  const approvedRevs = reviewers.filter(r => r.approvalStatus === 'approved');
+  const pendingRevs  = reviewers.filter(r => r.approvalStatus === 'pending');
 
   return (
     <div>
-      {/* Tabs */}
       <div className="flex gap-1 mb-5 bg-gray-100 p-1 rounded-xl">
         {[['details', 'Profile Details'], ['assessment', 'Assessment Status'], ['edit', 'Edit Profile']].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
@@ -64,10 +68,8 @@ function EmployeeModal({ employee, onSave, onClose }) {
         ))}
       </div>
 
-      {/* ── Details Tab ──────────────────────────────────────── */}
       {tab === 'details' && (
         <div className="space-y-4">
-          {/* Profile header */}
           <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-indigo-50 to-white rounded-2xl border border-indigo-100">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-400 to-indigo-700 flex items-center justify-center flex-shrink-0">
               <span className="text-white text-xl font-bold">{employee.name?.[0]?.toUpperCase()}</span>
@@ -84,14 +86,13 @@ function EmployeeModal({ employee, onSave, onClose }) {
             </div>
           </div>
 
-          {/* Info grid */}
           <div className="grid grid-cols-2 gap-3">
             {[
               { icon: Mail,      label: 'Email',        val: employee.email },
               { icon: Phone,     label: 'Phone',        val: employee.phone || '—' },
               { icon: Building2, label: 'Organization', val: employee.organization },
-              { icon: Users,     label: 'Reports To',   val: employee.reportsTo || '—' },
-              { icon: Star,      label: 'Employee Code',val: employee.employeeCode || '—' },
+              { icon: Users,     label: 'Reports To',   val: employee.manager || '—' },
+              { icon: Star,      label: 'Employee ID',  val: employee.employeeId || '—' },
               { icon: Briefcase, label: 'Location',     val: employee.location || '—' },
             ].map(({ icon: Icon, label, val }) => (
               <div key={label} className="p-3 bg-gray-50 rounded-xl">
@@ -103,7 +104,6 @@ function EmployeeModal({ employee, onSave, onClose }) {
             ))}
           </div>
 
-          {/* Status control */}
           <div className="p-4 border border-gray-200 rounded-2xl">
             <p className="text-xs font-semibold text-gray-600 mb-2">Account Status</p>
             <div className="flex gap-2">
@@ -123,10 +123,8 @@ function EmployeeModal({ employee, onSave, onClose }) {
         </div>
       )}
 
-      {/* ── Assessment Status Tab ─────────────────────────────── */}
       {tab === 'assessment' && (
         <div className="space-y-4">
-          {/* Self-assessment */}
           <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-semibold text-indigo-800">Self-Assessment</span>
@@ -134,15 +132,9 @@ function EmployeeModal({ employee, onSave, onClose }) {
                 {assessment?.status === 'submitted' ? 'Submitted' : assessment ? 'In Progress' : 'Not Started'}
               </Badge>
             </div>
-            {assessment && (
-              <div className="text-xs text-indigo-600 mt-1">
-                Last updated: {assessment.updatedAt?.substring(0, 10)}
-                {assessment.submittedAt && ` · Submitted: ${assessment.submittedAt.substring(0, 10)}`}
-              </div>
-            )}
+            {assessment?.updatedAt && <div className="text-xs text-indigo-600">Last updated: {assessment.updatedAt?.substring(0, 10)}</div>}
           </div>
 
-          {/* Assignments */}
           <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-semibold text-amber-800">Assignments</span>
@@ -155,7 +147,6 @@ function EmployeeModal({ employee, onSave, onClose }) {
             ))}
           </div>
 
-          {/* Nominations */}
           <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-semibold text-emerald-800">Nominations</span>
@@ -165,7 +156,6 @@ function EmployeeModal({ employee, onSave, onClose }) {
             </div>
           </div>
 
-          {/* Reviewers */}
           <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-semibold text-blue-800">Reviewers</span>
@@ -184,7 +174,7 @@ function EmployeeModal({ employee, onSave, onClose }) {
                     </div>
                     <div className="flex gap-1.5">
                       <Badge variant="info" size="xs">{r.category}</Badge>
-                      <Badge variant={STATUS_CONFIG[r.status]?.variant || 'default'} size="xs">{r.status}</Badge>
+                      <Badge variant={STATUS_CONFIG[r.approvalStatus]?.variant || 'default'} size="xs">{r.approvalStatus}</Badge>
                     </div>
                   </div>
                 ))}
@@ -196,15 +186,11 @@ function EmployeeModal({ employee, onSave, onClose }) {
         </div>
       )}
 
-      {/* ── Edit Tab ──────────────────────────────────────────── */}
       {tab === 'edit' && (
         <div className="space-y-4">
-          {saved && (
-            <Alert type="success"><div className="flex items-center gap-2"><CheckCircle size={14} />Profile updated successfully.</div></Alert>
-          )}
+          {saved && <Alert type="success"><div className="flex items-center gap-2"><CheckCircle size={14} />Profile updated successfully.</div></Alert>}
           <div className="grid grid-cols-2 gap-3">
             <Input label="Full Name" value={form.name || ''} onChange={set('name')} required />
-            <Input label="Employee Code" value={form.employeeCode || ''} onChange={set('employeeCode')} />
             <Input label="Job Title" value={form.jobTitle || ''} onChange={set('jobTitle')} required />
             <Select label="Department" value={form.department || ''} onChange={set('department')}>
               <option value="">Select</option>
@@ -217,17 +203,14 @@ function EmployeeModal({ employee, onSave, onClose }) {
             </Select>
             <Input label="Phone" value={form.phone || ''} onChange={set('phone')} />
             <Input label="Location" value={form.location || ''} onChange={set('location')} />
-            <Input label="Reports To" value={form.reportsTo || ''} onChange={set('reportsTo')} wrapClass="col-span-2" />
+            <Input label="Reports To" value={form.manager || ''} onChange={set('manager')} />
           </div>
-
-          {/* Status */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Status</label>
             <Select value={form.status || 'active'} onChange={set('status')}>
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
             </Select>
           </div>
-
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={onClose}>Cancel</Button>
             <Button onClick={handleSave}>Save Changes</Button>
@@ -238,20 +221,27 @@ function EmployeeModal({ employee, onSave, onClose }) {
   );
 }
 
-// ─── Main Page ─────────────────────────────────────────────────
 export default function AdminEmployees() {
-  const { refresh } = useApp();
-  const [search, setSearch]   = useState('');
+  const { refresh, tick } = useApp();
+  const [employees,    setEmployees]    = useState([]);
+  const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [deptFilter, setDeptFilter]     = useState('all');
-  const [viewModal, setViewModal]       = useState(null);
+  const [deptFilter,   setDeptFilter]   = useState('all');
+  const [viewModal,    setViewModal]    = useState(null);
   const [notification, setNotification] = useState('');
+  const [loading,      setLoading]      = useState(true);
 
-  const employees = useMemo(() => getAllEmployees(), [notification]);
+  useEffect(() => {
+    setLoading(true);
+    getAllEmployees().then(emps => {
+      setEmployees(emps || []);
+      setLoading(false);
+    });
+  }, [tick]);
 
   const notify = msg => { setNotification(msg); setTimeout(() => setNotification(''), 3000); refresh(); };
 
-  const filtered = useMemo(() => employees.filter(e => {
+  const filtered = employees.filter(e => {
     const matchSearch = !search || e.name?.toLowerCase().includes(search.toLowerCase()) ||
       e.email?.toLowerCase().includes(search.toLowerCase()) ||
       e.jobTitle?.toLowerCase().includes(search.toLowerCase()) ||
@@ -259,33 +249,32 @@ export default function AdminEmployees() {
     const matchStatus = statusFilter === 'all' || (e.status || 'active') === statusFilter;
     const matchDept   = deptFilter === 'all' || e.department === deptFilter;
     return matchSearch && matchStatus && matchDept;
-  }), [employees, search, statusFilter, deptFilter]);
+  });
 
-  const handleSave = (empId, updates) => {
-    updateEmployee(empId, updates);
+  const handleSave = async (empId, updates) => {
+    await updateEmployee(empId, updates);
     notify('Employee profile updated.');
+    setEmployees(prev => prev.map(e => e.id === empId ? { ...e, ...updates } : e));
     if (viewModal?.id === empId) setViewModal(prev => ({ ...prev, ...updates }));
   };
 
   const depts = [...new Set(employees.map(e => e.department).filter(Boolean))];
-
   const counts = {
     active:    employees.filter(e => (e.status || 'active') === 'active').length,
     inactive:  employees.filter(e => e.status === 'inactive').length,
     suspended: employees.filter(e => e.status === 'suspended').length,
   };
 
+  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading employees…</div>;
+
   return (
     <div>
       <PageHeader title="Employee Management" subtitle="View, edit, and manage all registered employee profiles." />
 
       {notification && (
-        <Alert type="success" className="mb-4">
-          <div className="flex items-center gap-2"><CheckCircle size={14} />{notification}</div>
-        </Alert>
+        <Alert type="success" className="mb-4"><div className="flex items-center gap-2"><CheckCircle size={14} />{notification}</div></Alert>
       )}
 
-      {/* Summary stats */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
           { label: 'Total', value: employees.length, color: 'text-indigo-600', bg: 'bg-indigo-50' },
@@ -299,7 +288,6 @@ export default function AdminEmployees() {
         ))}
       </div>
 
-      {/* Search + Filters */}
       <div className="flex flex-col sm:flex-row gap-3 mb-5">
         <div className="relative flex-1">
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -322,7 +310,6 @@ export default function AdminEmployees() {
         </select>
       </div>
 
-      {/* Employee list */}
       {filtered.length === 0 ? (
         <Card>
           <EmptyState icon={Users} title="No employees found"
@@ -332,18 +319,12 @@ export default function AdminEmployees() {
         <div className="space-y-2">
           {filtered.map(emp => {
             const statusCfg = STATUS_CONFIG[emp.status || 'active'];
-            const assessment = getAssessment(emp.id);
-            const assignments = getAssignmentsByEmployee(emp.id);
-
             return (
               <div key={emp.id}
                 className="bg-white rounded-2xl border border-gray-200 p-4 flex items-center gap-4 hover:border-indigo-200 hover:shadow-sm transition-all">
-                {/* Avatar */}
                 <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center flex-shrink-0">
                   <span className="text-white font-bold">{emp.name?.[0]?.toUpperCase()}</span>
                 </div>
-
-                {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-bold text-gray-800">{emp.name}</span>
@@ -353,32 +334,14 @@ export default function AdminEmployees() {
                   <div className="text-xs text-gray-500 mt-0.5">{emp.jobTitle} · {emp.department} · {emp.organization}</div>
                   <div className="text-xs text-gray-400 mt-0.5 truncate">{emp.email}</div>
                 </div>
-
-                {/* Progress indicators */}
-                <div className="hidden md:flex items-center gap-3 flex-shrink-0">
-                  <div className="text-center">
-                    <div className={`text-xs font-bold ${assessment?.status === 'submitted' ? 'text-emerald-600' : assessment ? 'text-amber-600' : 'text-gray-400'}`}>
-                      {assessment?.status === 'submitted' ? '✓' : assessment ? '…' : '–'}
-                    </div>
-                    <div className="text-xs text-gray-400">Self-Assess</div>
-                  </div>
-                  <div className="text-center">
-                    <div className={`text-xs font-bold ${assignments.length > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
-                      {assignments.length}/3
-                    </div>
-                    <div className="text-xs text-gray-400">Assignments</div>
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    Joined {emp.createdAt?.substring(0, 10)}
-                  </div>
+                <div className="hidden md:flex items-center gap-3 flex-shrink-0 text-xs text-gray-400">
+                  Joined {emp.createdAt?.substring(0, 10)}
                 </div>
-
-                {/* Actions */}
                 <div className="flex gap-2 flex-shrink-0">
                   <Button size="xs" variant="secondary" onClick={() => setViewModal(emp)}>
                     <Eye size={13} />View
                   </Button>
-                  <Button size="xs" variant="ghost" onClick={() => { setViewModal(emp); }}>
+                  <Button size="xs" variant="ghost" onClick={() => setViewModal(emp)}>
                     <Edit3 size={13} />Edit
                   </Button>
                 </div>
@@ -392,17 +355,12 @@ export default function AdminEmployees() {
         Showing {filtered.length} of {employees.length} employees
       </div>
 
-      {/* Employee detail/edit modal */}
       {viewModal && (
         <Modal open={!!viewModal} onClose={() => setViewModal(null)}
           title={`${viewModal.name} — Employee Profile`} size="lg">
           <EmployeeModal
             employee={viewModal}
-            onSave={(empId, updates) => {
-              handleSave(empId, updates);
-              // Keep modal open with updated data
-              setViewModal(prev => ({ ...prev, ...updates }));
-            }}
+            onSave={handleSave}
             onClose={() => setViewModal(null)}
           />
         </Modal>

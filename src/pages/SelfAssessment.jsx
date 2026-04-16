@@ -1,37 +1,59 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   getEmployeeByUserId, getAssessment, saveAssessmentProgress,
   submitSelfAssessment, getTemplateForEmployee
-} from '../store/db';
+} from '../lib/supabase';
 import { RATING_SCALE } from '../data/competencies';
 import { Button, Card, Alert, ProgressBar, Badge, TipBox, PageHeader, Modal } from '../components/UI';
-import { CheckCircle, Save, Send, ChevronRight, ChevronLeft, Info } from 'lucide-react';
+import { CheckCircle, Save, Send, ChevronRight, ChevronLeft } from 'lucide-react';
 
 export default function SelfAssessment({ onNavigate }) {
   const { currentUser, refresh } = useApp();
-  const employee = useMemo(() => getEmployeeByUserId(currentUser.id), [currentUser]);
-  const sections  = useMemo(() => employee ? getTemplateForEmployee(employee) : [], [employee]);
-  const assessment = useMemo(() => employee ? getAssessment(employee.id) : null, [employee, currentUser]);
-
+  const [employee,   setEmployee]   = useState(null);
+  const [sections,   setSections]   = useState([]);
+  const [localRatings, setLocalRatings] = useState({});
   const [activeSection, setActiveSection] = useState(0);
-  const [localRatings, setLocalRatings] = useState(() => assessment?.sections || {});
-  const [saved, setSaved]   = useState(false);
+  const [saved,      setSaved]      = useState(false);
+  const [saving,     setSaving]     = useState(false);
   const [submitModal, setSubmitModal] = useState(false);
-  const [submitted, setSubmitted] = useState(assessment?.status === 'submitted');
+  const [submitted,  setSubmitted]  = useState(false);
+  const [loading,    setLoading]    = useState(true);
+  const empRef = useRef(null);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    getEmployeeByUserId(currentUser.id).then(async emp => {
+      setEmployee(emp);
+      empRef.current = emp;
+      if (emp) {
+        const [assessment, tpls] = await Promise.all([
+          getAssessment(emp.id),
+          getTemplateForEmployee(emp),
+        ]);
+        setSections(tpls || []);
+        setLocalRatings(assessment?.sections || {});
+        setSubmitted(assessment?.status === 'submitted');
+      }
+      setLoading(false);
+    });
+  }, [currentUser?.id]);
 
   const section = sections[activeSection];
 
   const handleRate = (statementId, value) => {
+    if (!section) return;
     const sId = section.id;
     setLocalRatings(prev => ({ ...prev, [sId]: { ...(prev[sId] || {}), [statementId]: value } }));
     setSaved(false);
   };
 
-  const handleSave = () => {
-    if (!section || !employee) return;
-    saveAssessmentProgress(employee.id, section.id, localRatings[section.id] || {});
-    refresh();
+  const handleSave = async () => {
+    const emp = empRef.current;
+    if (!section || !emp) return;
+    setSaving(true);
+    await saveAssessmentProgress(emp.id, section.id, localRatings[section.id] || {});
+    setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -43,23 +65,28 @@ export default function SelfAssessment({ onNavigate }) {
     return sec.statements.every(st => ratings[st.id] !== undefined);
   };
 
-  const allComplete = sections.every(s => sectionComplete(s.id));
+  const allComplete = sections.length > 0 && sections.every(s => sectionComplete(s.id));
 
-  const handleSubmit = () => {
-    // Save all sections first
-    sections.forEach(sec => {
-      saveAssessmentProgress(employee.id, sec.id, localRatings[sec.id] || {});
-    });
-    submitSelfAssessment(employee.id);
+  const handleSubmit = async () => {
+    const emp = empRef.current;
+    if (!emp) return;
+    setSaving(true);
+    for (const sec of sections) {
+      await saveAssessmentProgress(emp.id, sec.id, localRatings[sec.id] || {});
+    }
+    await submitSelfAssessment(emp.id);
     refresh();
+    setSaving(false);
     setSubmitted(true);
     setSubmitModal(false);
   };
 
   const totalStatements = sections.reduce((s, sec) => s + sec.statements.length, 0);
-  const totalRated = sections.reduce((s, sec) => {
-    return s + Object.keys(localRatings[sec.id] || {}).length;
-  }, 0);
+  const totalRated = sections.reduce((s, sec) => s + Object.keys(localRatings[sec.id] || {}).length, 0);
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-64 text-gray-400">Loading assessment…</div>;
+  }
 
   if (!employee) {
     return <Alert type="warning">Please complete your profile first before starting the self-assessment.</Alert>;
@@ -91,7 +118,7 @@ export default function SelfAssessment({ onNavigate }) {
         <ProgressBar value={totalRated} max={totalStatements} color="indigo" showPercent />
         <div className="flex gap-2 mt-3 flex-wrap">
           {sections.map((sec, i) => (
-            <button key={sec.id} onClick={() => { handleSave(); setActiveSection(i); }}
+            <button key={sec.id} onClick={async () => { await handleSave(); setActiveSection(i); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all
                 ${i === activeSection ? 'bg-indigo-600 text-white border-indigo-600' : sectionComplete(sec.id) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-300'}`}>
               {sectionComplete(sec.id) && <CheckCircle size={11} />}
@@ -161,11 +188,11 @@ export default function SelfAssessment({ onNavigate }) {
       {/* Navigation + Actions */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={() => { handleSave(); setActiveSection(a => Math.max(0, a - 1)); }} disabled={activeSection === 0}>
+          <Button variant="secondary" size="sm" onClick={async () => { await handleSave(); setActiveSection(a => Math.max(0, a - 1)); }} disabled={activeSection === 0}>
             <ChevronLeft size={16} />Previous
           </Button>
           {activeSection < sections.length - 1 ? (
-            <Button size="sm" onClick={() => { handleSave(); setActiveSection(a => a + 1); }}>
+            <Button size="sm" onClick={async () => { await handleSave(); setActiveSection(a => a + 1); }}>
               Next Section <ChevronRight size={16} />
             </Button>
           ) : null}
@@ -173,7 +200,7 @@ export default function SelfAssessment({ onNavigate }) {
 
         <div className="flex gap-2 items-center">
           {saved && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle size={12} />Saved</span>}
-          <Button variant="secondary" size="sm" onClick={handleSave}><Save size={14} />Save Progress</Button>
+          <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving}><Save size={14} />{saving ? 'Saving…' : 'Save Progress'}</Button>
           {allComplete && (
             <Button variant="success" size="sm" onClick={() => setSubmitModal(true)}><Send size={14} />Submit Assessment</Button>
           )}
@@ -185,7 +212,7 @@ export default function SelfAssessment({ onNavigate }) {
         <p className="text-sm text-gray-600 mb-4">You have rated all {totalStatements} statements across {sections.length} sections. Once submitted, ratings cannot be changed.</p>
         <div className="flex gap-3 justify-end">
           <Button variant="secondary" onClick={() => setSubmitModal(false)}>Cancel</Button>
-          <Button variant="success" onClick={handleSubmit}><Send size={14} />Submit Now</Button>
+          <Button variant="success" onClick={handleSubmit} disabled={saving}><Send size={14} />{saving ? 'Submitting…' : 'Submit Now'}</Button>
         </div>
       </Modal>
     </div>

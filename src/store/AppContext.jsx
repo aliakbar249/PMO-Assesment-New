@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useCallback } from 'react';
-import { loadDb, saveDb } from './db';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { initDb } from '../lib/supabase';
 
 const AppContext = createContext(null);
 
@@ -7,8 +7,18 @@ export function AppProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(() => {
     try { const s = sessionStorage.getItem('360_user'); return s ? JSON.parse(s) : null; } catch { return null; }
   });
-  // Lightweight trigger for re-renders after db mutations
+  const [dbReady, setDbReady] = useState(false);
   const [tick, setTick] = useState(0);
+
+  // Initialize Supabase on app start (create tables/seed if needed)
+  useEffect(() => {
+    initDb()
+      .then(() => setDbReady(true))
+      .catch(err => {
+        console.warn('DB init warning:', err);
+        setDbReady(true); // Allow app to run even if seed fails
+      });
+  }, []);
 
   const refresh = useCallback(() => setTick(t => t + 1), []);
 
@@ -24,7 +34,7 @@ export function AppProvider({ children }) {
   }, []);
 
   return (
-    <AppContext.Provider value={{ currentUser, login, logout, refresh, tick }}>
+    <AppContext.Provider value={{ currentUser, login, logout, refresh, tick, dbReady }}>
       {children}
     </AppContext.Provider>
   );

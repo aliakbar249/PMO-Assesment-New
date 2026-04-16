@@ -1,24 +1,35 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { getProgressSummary, getAllEmployees, getAllReviewers } from '../store/db';
+import { getProgressSummary, getAllReviewers } from '../lib/supabase';
 import { StatCard, Card, Badge, ProgressBar, PageHeader, Button } from '../components/UI';
-import { Users, ClipboardList, CheckCircle, Clock, AlertCircle, ChevronRight } from 'lucide-react';
+import { Users, CheckCircle, Clock, AlertCircle, ChevronRight } from 'lucide-react';
 
 export default function AdminDashboard({ onNavigate }) {
-  const { currentUser } = useApp();
-  const progress   = useMemo(() => getProgressSummary(), [currentUser]);
-  const reviewers  = useMemo(() => getAllReviewers(), [currentUser]);
-  const pendingRev = reviewers.filter(r => r.status === 'pending');
+  const { tick } = useApp();
+  const [progress,  setProgress]  = useState([]);
+  const [reviewers, setReviewers] = useState([]);
+  const [loading,   setLoading]   = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([getProgressSummary(), getAllReviewers()]).then(([prog, revs]) => {
+      setProgress(prog || []);
+      setReviewers(revs || []);
+      setLoading(false);
+    });
+  }, [tick]);
+
+  const pendingRev = reviewers.filter(r => r.approvalStatus === 'pending');
   const totalEmp   = progress.length;
   const submitted  = progress.filter(p => p.selfAssessmentStatus === 'submitted').length;
   const inProgress = progress.filter(p => p.selfAssessmentStatus === 'in_progress').length;
-  const completedReviews = reviewers.filter(r => r.status === 'approved').length;
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading dashboard…</div>;
 
   return (
     <div>
       <PageHeader title="Administrator Dashboard" subtitle="Monitor 360° assessment activity across all employees." />
 
-      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Employees" value={totalEmp} icon={Users} color="indigo" />
         <StatCard label="Assessments Submitted" value={submitted} sub={`of ${totalEmp}`} icon={CheckCircle} color="green" />
@@ -26,7 +37,6 @@ export default function AdminDashboard({ onNavigate }) {
         <StatCard label="Pending Approvals" value={pendingRev.length} icon={AlertCircle} color="red" />
       </div>
 
-      {/* Pending approvals alert */}
       {pendingRev.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -40,7 +50,6 @@ export default function AdminDashboard({ onNavigate }) {
         </div>
       )}
 
-      {/* Employee list */}
       <Card>
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-700">Employee Progress Overview</h3>

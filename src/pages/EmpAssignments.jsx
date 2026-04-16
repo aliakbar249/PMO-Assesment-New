@@ -1,9 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../store/AppContext';
-import { getEmployeeByUserId, getAssignmentsByEmployee, upsertAssignment, deleteAssignment } from '../store/db';
-import { v4 as uuidv4 } from 'uuid';
+import { getEmployeeByUserId, getAssignmentsByEmployee, upsertAssignment, deleteAssignment } from '../lib/supabase';
 import { Button, Card, Input, Select, Textarea, Alert, Badge, PageHeader, Modal, EmptyState } from '../components/UI';
-import { Plus, Edit3, Trash2, Briefcase, CheckCircle, Save } from 'lucide-react';
+import { Plus, Edit3, Trash2, Briefcase, Save } from 'lucide-react';
 
 const ASSIGNMENT_TYPES = ['Project', 'Programme', 'Consulting Engagement', 'Internal Initiative', 'Change Programme', 'Operational', 'Other'];
 const SECTORS = ['Banking & Finance', 'Technology', 'Healthcare', 'Energy', 'Government', 'Retail', 'Manufacturing', 'Telecoms', 'Construction', 'Other'];
@@ -12,10 +11,11 @@ const STATUS_OPTIONS = ['Ongoing', 'Completed', 'On Hold', 'Cancelled'];
 const BUDGET_RANGES = ['< $100K', '$100K–$500K', '$500K–$1M', '$1M–$5M', '$5M–$20M', '$20M+', 'Confidential'];
 
 const EMPTY_FORM = {
-  id: '', title: '', type: '', sector: '', organization: '',
+  id: '', title: '', type: '', sector: '', clientOrg: '',
   role: '', startDate: '', endDate: '', status: '',
-  budgetRange: '', teamSize: '', location: '',
-  description: '', keyOutcomes: '', challenges: '',
+  budget: '', teamSize: '', location: '',
+  description: '', outcomes: '', challenges: '',
+  slotNumber: 1,
 };
 
 function AssignmentForm({ initial, onSave, onCancel }) {
@@ -27,7 +27,7 @@ function AssignmentForm({ initial, onSave, onCancel }) {
     const e = {};
     if (!form.title.trim()) e.title = 'Required';
     if (!form.type) e.type = 'Required';
-    if (!form.organization.trim()) e.organization = 'Required';
+    if (!form.clientOrg?.trim()) e.clientOrg = 'Required';
     if (!form.role) e.role = 'Required';
     if (!form.startDate) e.startDate = 'Required';
     if (!form.status) e.status = 'Required';
@@ -35,11 +35,10 @@ function AssignmentForm({ initial, onSave, onCancel }) {
     return !Object.keys(e).length;
   };
 
-  const handleSave = () => { if (validate()) onSave({ ...form, id: form.id || uuidv4() }); };
+  const handleSave = () => { if (validate()) onSave(form); };
 
   return (
     <div className="space-y-4">
-      {/* Row 1 */}
       <Input label="Assignment / Project Title" placeholder="ERP System Rollout" value={form.title} onChange={set('title')} error={errors.title} required />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -54,7 +53,7 @@ function AssignmentForm({ initial, onSave, onCancel }) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Input label="Client / Organization" placeholder="Client Corp Ltd" value={form.organization} onChange={set('organization')} error={errors.organization} required />
+        <Input label="Client / Organization" placeholder="Client Corp Ltd" value={form.clientOrg || ''} onChange={set('clientOrg')} error={errors.clientOrg} required />
         <Select label="Your Role on Assignment" value={form.role} onChange={set('role')} error={errors.role} required>
           <option value="">Select role</option>
           {ROLES_ON_ASSIGNMENT.map(r => <option key={r}>{r}</option>)}
@@ -68,20 +67,20 @@ function AssignmentForm({ initial, onSave, onCancel }) {
           <option value="">Status</option>
           {STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
         </Select>
-        <Select label="Budget Range" value={form.budgetRange} onChange={set('budgetRange')}>
+        <Select label="Budget Range" value={form.budget || ''} onChange={set('budget')}>
           <option value="">Select range</option>
           {BUDGET_RANGES.map(b => <option key={b}>{b}</option>)}
         </Select>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Input label="Team Size" type="number" placeholder="12" min="1" value={form.teamSize} onChange={set('teamSize')} />
-        <Input label="Location / Geography" placeholder="New York / Remote" value={form.location} onChange={set('location')} />
+        <Input label="Team Size" type="number" placeholder="12" min="1" value={form.teamSize || ''} onChange={set('teamSize')} />
+        <Input label="Location / Geography" placeholder="New York / Remote" value={form.location || ''} onChange={set('location')} />
       </div>
 
-      <Textarea label="Assignment Description" placeholder="Brief description of the assignment scope and objectives…" value={form.description} onChange={set('description')} rows={3} />
-      <Textarea label="Key Outcomes / Achievements" placeholder="What were the key results, deliverables, or achievements…" value={form.keyOutcomes} onChange={set('keyOutcomes')} rows={3} />
-      <Textarea label="Key Challenges Overcome" placeholder="Significant challenges or risks you managed…" value={form.challenges} onChange={set('challenges')} rows={2} />
+      <Textarea label="Assignment Description" placeholder="Brief description of the assignment scope and objectives…" value={form.description || ''} onChange={set('description')} rows={3} />
+      <Textarea label="Key Outcomes / Achievements" placeholder="What were the key results, deliverables, or achievements…" value={form.outcomes || ''} onChange={set('outcomes')} rows={3} />
+      <Textarea label="Key Challenges Overcome" placeholder="Significant challenges or risks you managed…" value={form.challenges || ''} onChange={set('challenges')} rows={2} />
 
       <div className="flex gap-3 justify-end pt-2">
         <Button variant="secondary" onClick={onCancel}>Cancel</Button>
@@ -92,24 +91,54 @@ function AssignmentForm({ initial, onSave, onCancel }) {
 }
 
 export default function EmpAssignments({ onNavigate }) {
-  const { currentUser, refresh } = useApp();
-  const employee = useMemo(() => getEmployeeByUserId(currentUser.id), [currentUser]);
-  const assignments = useMemo(() => employee ? getAssignmentsByEmployee(employee.id) : [], [employee, currentUser]);
-
-  const [modal, setModal] = useState(null); // null | 'add' | { id: ... }
+  const { currentUser, tick } = useApp();
+  const [employee, setEmployee] = useState(null);
+  const [assignments, setAssignments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const empRef = useRef(null);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    setLoading(true);
+    getEmployeeByUserId(currentUser.id).then(async emp => {
+      setEmployee(emp);
+      empRef.current = emp;
+      if (emp) {
+        const asgns = await getAssignmentsByEmployee(emp.id);
+        setAssignments(asgns || []);
+      }
+      setLoading(false);
+    });
+  }, [currentUser?.id, tick]);
+
+  const reload = async () => {
+    const emp = empRef.current;
+    if (emp) {
+      const asgns = await getAssignmentsByEmployee(emp.id);
+      setAssignments(asgns || []);
+    }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading assignments…</div>;
   if (!employee) return <Alert type="warning">Please complete your profile first.</Alert>;
 
-  const handleSave = (data) => {
-    upsertAssignment(employee.id, data);
-    refresh();
+  const handleSave = async (data) => {
+    setSaving(true);
+    const slot = data.id
+      ? (assignments.find(a => a.id === data.id)?.slotNumber || assignments.length + 1)
+      : assignments.length + 1;
+    await upsertAssignment(employee.id, { ...data, slotNumber: slot });
+    await reload();
+    setSaving(false);
     setModal(null);
   };
 
-  const handleDelete = (id) => {
-    deleteAssignment(id);
-    refresh();
+  const handleDelete = async (id) => {
+    await deleteAssignment(id);
+    await reload();
     setDeleteModal(null);
   };
 
@@ -154,7 +183,7 @@ export default function EmpAssignments({ onNavigate }) {
                       </Badge>
                       <span className="text-xs text-gray-400">Assignment {i + 1}</span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-0.5">{asgn.role} · {asgn.organization}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{asgn.role} · {asgn.clientOrg}</p>
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
@@ -168,8 +197,8 @@ export default function EmpAssignments({ onNavigate }) {
                   { label: 'Type', val: asgn.type },
                   { label: 'Sector', val: asgn.sector },
                   { label: 'Period', val: `${asgn.startDate || '?'}${asgn.endDate ? ' → ' + asgn.endDate : ' → Present'}` },
-                  { label: 'Budget', val: asgn.budgetRange },
-                  { label: 'Team Size', val: asgn.teamSize ? `${asgn.teamSize} people` : '—' },
+                  { label: 'Budget', val: asgn.budget },
+                  { label: 'Team Size', val: asgn.teamSize ? `${asgn.teamSize} people` : null },
                   { label: 'Location', val: asgn.location },
                 ].filter(f => f.val).map(f => (
                   <div key={f.label} className="bg-gray-50 rounded-lg p-2">
@@ -180,7 +209,7 @@ export default function EmpAssignments({ onNavigate }) {
               </div>
 
               {asgn.description && <p className="text-xs text-gray-600 mb-2"><span className="font-semibold">Description:</span> {asgn.description}</p>}
-              {asgn.keyOutcomes && <p className="text-xs text-gray-600 mb-2"><span className="font-semibold">Key Outcomes:</span> {asgn.keyOutcomes}</p>}
+              {asgn.outcomes && <p className="text-xs text-gray-600 mb-2"><span className="font-semibold">Key Outcomes:</span> {asgn.outcomes}</p>}
               {asgn.challenges && <p className="text-xs text-gray-600"><span className="font-semibold">Challenges:</span> {asgn.challenges}</p>}
             </Card>
           ))}
@@ -205,7 +234,7 @@ export default function EmpAssignments({ onNavigate }) {
 
       {/* Delete confirmation */}
       <Modal open={!!deleteModal} onClose={() => setDeleteModal(null)} title="Delete Assignment?" size="sm">
-        <p className="text-sm text-gray-600 mb-4">This will permanently remove this assignment and all associated nominations. This cannot be undone.</p>
+        <p className="text-sm text-gray-600 mb-4">This will permanently remove this assignment. This cannot be undone.</p>
         <div className="flex gap-3 justify-end">
           <Button variant="secondary" onClick={() => setDeleteModal(null)}>Cancel</Button>
           <Button variant="danger" onClick={() => handleDelete(deleteModal)}><Trash2 size={14} />Delete</Button>

@@ -1,25 +1,44 @@
-import { useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   getEmployeeByUserId, getAssessment, getAssignmentsByEmployee,
   getNominations, getTemplateForEmployee
-} from '../store/db';
-import { StatCard, Card, CardHeader, ProgressBar, Badge, Button, Alert } from '../components/UI';
+} from '../lib/supabase';
+import { StatCard, Card, ProgressBar, Badge, Button, Alert } from '../components/UI';
 import { Star, Briefcase, Users, ClipboardList, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 
 export default function EmpDashboard({ onNavigate }) {
-  const { currentUser } = useApp();
-  const employee   = useMemo(() => getEmployeeByUserId(currentUser.id), [currentUser]);
-  const assessment = useMemo(() => employee ? getAssessment(employee.id) : null, [employee]);
-  const assignments = useMemo(() => employee ? getAssignmentsByEmployee(employee.id) : [], [employee]);
-  const nominations = useMemo(() => employee ? getNominations(employee.id) : null, [employee]);
-  const templates  = useMemo(() => employee ? getTemplateForEmployee(employee) : [], [employee]);
+  const { currentUser, tick } = useApp();
+  const [employee,    setEmployee]    = useState(null);
+  const [assessment,  setAssessment]  = useState(null);
+  const [assignments, setAssignments] = useState([]);
+  const [nominations, setNominations] = useState(null);
+  const [templates,   setTemplates]   = useState([]);
+  const [loading,     setLoading]     = useState(true);
 
-  const totalStatements = useMemo(() => templates.reduce((s, sec) => s + (sec.statements?.length || 0), 0), [templates]);
-  const ratedStatements = useMemo(() => {
-    if (!assessment) return 0;
-    return Object.values(assessment.sections || {}).reduce((s, sec) => s + Object.keys(sec).length, 0);
-  }, [assessment]);
+  useEffect(() => {
+    if (!currentUser) return;
+    setLoading(true);
+    getEmployeeByUserId(currentUser.id).then(async emp => {
+      setEmployee(emp);
+      if (emp) {
+        const [a, asgns, noms, tpls] = await Promise.all([
+          getAssessment(emp.id),
+          getAssignmentsByEmployee(emp.id),
+          getNominations(emp.id),
+          getTemplateForEmployee(emp),
+        ]);
+        setAssessment(a);
+        setAssignments(asgns || []);
+        setNominations(noms);
+        setTemplates(tpls || []);
+      }
+      setLoading(false);
+    });
+  }, [currentUser?.id, tick]);
+
+  const totalStatements = templates.reduce((s, sec) => s + (sec.statements?.length || 0), 0);
+  const ratedStatements = Object.values(assessment?.sections || {}).reduce((s, sec) => s + Object.keys(sec).length, 0);
 
   const steps = [
     {
@@ -48,6 +67,10 @@ export default function EmpDashboard({ onNavigate }) {
       status: nominations?.submitted ? 'Submitted' : nominations ? 'In progress' : 'Not started',
     },
   ];
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-64 text-gray-400">Loading dashboard…</div>;
+  }
 
   return (
     <div>

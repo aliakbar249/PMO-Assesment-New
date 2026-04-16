@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { getTemplates, saveTemplates, getAssessmentTemplates, saveAssessmentTemplates } from '../store/db';
+import { getTemplates, saveTemplates } from '../lib/supabase';
 import { Button, Card, Input, Textarea, Alert, Badge, Modal, PageHeader } from '../components/UI';
 import { Plus, Edit3, Trash2, Save, Settings, CheckCircle, GripVertical } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
@@ -22,9 +22,18 @@ function StatementEditor({ stmt, sectionIdx, stmtIdx, onChange, onDelete }) {
 }
 
 export default function AdminTemplates() {
-  const { refresh } = useApp();
-  const [sections, setSections] = useState(() => getTemplates());
+  const { refresh, tick } = useApp();
+  const [sections, setSections] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    getTemplates().then(tpls => {
+      setSections(tpls || []);
+      setLoading(false);
+    });
+  }, [tick]);
   const [addSectionModal, setAddSectionModal] = useState(false);
   const [newSection, setNewSection] = useState({ title: '', description: '', selfTip: '', reviewerTip: '' });
   const [editSectionModal, setEditSectionModal] = useState(null);
@@ -54,8 +63,8 @@ export default function AdminTemplates() {
     setSaved(false);
   };
 
-  const handleSave = () => {
-    saveTemplates(sections);
+  const handleSave = async () => {
+    await saveTemplates(sections);
     refresh();
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);

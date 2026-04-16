@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getFullExportData } from '../store/db';
+import { getFullExportData } from '../lib/supabase';
 import { Button, Card, Badge, Alert, PageHeader } from '../components/UI';
 import { Download, FileText, Users, ClipboardList, Briefcase, CheckCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -24,11 +24,10 @@ export default function AdminExport() {
   const [exporting, setExporting] = useState(false);
   const [done, setDone] = useState('');
 
-  const doExport = (type) => {
+  const doExport = async (type) => {
     setExporting(true);
-    setTimeout(() => {
-      try {
-        const db = getFullExportData();
+    try {
+        const db = await getFullExportData();
         const wb = XLSX.utils.book_new();
 
         // ── Sheet 1: Employees ──────────────────────────────────
@@ -181,7 +180,6 @@ export default function AdminExport() {
         setDone('Export failed. Check console for details.');
       }
       setExporting(false);
-    }, 600);
   };
 
   return (

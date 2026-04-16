@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { getEmployeeByUserId, updateEmployee } from '../store/db';
+import { getEmployeeByUserId, updateEmployee } from '../lib/supabase';
 import { Button, Input, Select, Alert, Card, PageHeader, Badge } from '../components/UI';
 import { User, CheckCircle } from 'lucide-react';
 
@@ -9,22 +9,45 @@ const LEVELS = ['Junior', 'Mid-Level', 'Senior', 'Lead', 'Manager', 'Senior Mana
 
 export default function EmpProfile() {
   const { currentUser, refresh } = useApp();
-  const employee = useMemo(() => getEmployeeByUserId(currentUser.id), [currentUser]);
+  const [employee, setEmployee] = useState(null);
   const [form, setForm] = useState({
-    name: employee?.name || currentUser?.name || '',
-    email: employee?.email || currentUser?.email || '',
-    employeeCode: employee?.employeeCode || '',
-    jobTitle: employee?.jobTitle || '',
-    department: employee?.department || '',
-    level: employee?.level || '',
-    organization: employee?.organization || '',
-    phone: employee?.phone || '',
-    reportsTo: employee?.reportsTo || '',
-    location: employee?.location || '',
-    bio: employee?.bio || '',
+    name: currentUser?.name || '',
+    email: currentUser?.email || '',
+    employeeCode: '',
+    jobTitle: '',
+    department: '',
+    level: '',
+    organization: '',
+    phone: '',
+    manager: '',
+    location: '',
+    bio: '',
   });
   const [errors, setErrors] = useState({});
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    getEmployeeByUserId(currentUser.id).then(emp => {
+      if (emp) {
+        setEmployee(emp);
+        setForm({
+          name: emp.name || currentUser?.name || '',
+          email: emp.email || currentUser?.email || '',
+          employeeCode: emp.employeeId || '',
+          jobTitle: emp.jobTitle || '',
+          department: emp.department || '',
+          level: emp.level || '',
+          organization: emp.organization || '',
+          phone: emp.phone || '',
+          manager: emp.manager || '',
+          location: emp.location || '',
+          bio: emp.bio || '',
+        });
+      }
+    });
+  }, [currentUser?.id]);
 
   const set = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setErrors(er => ({ ...er, [k]: '' })); setSaved(false); };
 
@@ -38,10 +61,22 @@ export default function EmpProfile() {
     return !Object.keys(e).length;
   };
 
-  const handleSave = () => {
-    if (!validate()) return;
-    updateEmployee(employee.id, form);
+  const handleSave = async () => {
+    if (!validate() || !employee) return;
+    setSaving(true);
+    await updateEmployee(employee.id, {
+      name: form.name,
+      jobTitle: form.jobTitle,
+      department: form.department,
+      level: form.level,
+      organization: form.organization,
+      phone: form.phone,
+      manager: form.manager,
+      location: form.location,
+      profileComplete: true,
+    });
     refresh();
+    setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -67,7 +102,7 @@ export default function EmpProfile() {
             {form.location && <p className="text-xs text-gray-600"><span className="font-medium">Location:</span> {form.location}</p>}
             {form.email && <p className="text-xs text-gray-600 truncate"><span className="font-medium">Email:</span> {form.email}</p>}
             {form.phone && <p className="text-xs text-gray-600"><span className="font-medium">Phone:</span> {form.phone}</p>}
-            {form.reportsTo && <p className="text-xs text-gray-600"><span className="font-medium">Reports to:</span> {form.reportsTo}</p>}
+            {form.manager && <p className="text-xs text-gray-600"><span className="font-medium">Reports to:</span> {form.manager}</p>}
           </div>
         </Card>
 
@@ -77,8 +112,8 @@ export default function EmpProfile() {
             <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2"><User size={16} className="text-indigo-500" />Personal Information</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input label="Full Name" value={form.name} onChange={set('name')} error={errors.name} required />
-              <Input label="Email Address" type="email" value={form.email} onChange={set('email')} disabled hint="Email cannot be changed" />
-              <Input label="Employee Code" placeholder="EMP001" value={form.employeeCode} onChange={set('employeeCode')} />
+              <Input label="Email Address" type="email" value={form.email} disabled hint="Email cannot be changed" />
+              <Input label="Employee Code" placeholder="EMP001" value={form.employeeCode} disabled hint="Auto-assigned" />
               <Input label="Phone" type="tel" placeholder="+1 555 0000" value={form.phone} onChange={set('phone')} />
             </div>
           </Card>
@@ -96,7 +131,7 @@ export default function EmpProfile() {
                 <option value="">Select level</option>
                 {LEVELS.map(l => <option key={l}>{l}</option>)}
               </Select>
-              <Input label="Reports To" placeholder="Manager Name" value={form.reportsTo} onChange={set('reportsTo')} />
+              <Input label="Reports To" placeholder="Manager Name" value={form.manager} onChange={set('manager')} />
               <Input label="Office / Location" placeholder="New York" value={form.location} onChange={set('location')} />
             </div>
           </Card>
@@ -108,7 +143,7 @@ export default function EmpProfile() {
           </Card>
 
           <div className="flex justify-end">
-            <Button onClick={handleSave} size="lg">Save Profile</Button>
+            <Button onClick={handleSave} size="lg" disabled={saving}>{saving ? 'Saving…' : 'Save Profile'}</Button>
           </div>
         </div>
       </div>

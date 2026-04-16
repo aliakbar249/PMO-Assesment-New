@@ -1,31 +1,38 @@
-import { useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { getProgressSummary, getAllReviewers } from '../store/db';
+import { getProgressSummary, getAllReviewers } from '../lib/supabase';
 import { Card, Badge, ProgressBar, PageHeader, StatCard } from '../components/UI';
 import { Users, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 
-const STATUS_BADGE = {
-  submitted: 'success', in_progress: 'warning', not_started: 'default'
-};
-const STATUS_LABEL = {
-  submitted: 'Submitted', in_progress: 'In Progress', not_started: 'Not Started'
-};
+const STATUS_BADGE = { submitted: 'success', in_progress: 'warning', not_started: 'default' };
+const STATUS_LABEL = { submitted: 'Submitted', in_progress: 'In Progress', not_started: 'Not Started' };
 
 export default function AdminProgress() {
-  const { currentUser } = useApp();
-  const progress  = useMemo(() => getProgressSummary(), [currentUser]);
-  const reviewers = useMemo(() => getAllReviewers(), [currentUser]);
+  const { tick } = useApp();
+  const [progress,  setProgress]  = useState([]);
+  const [reviewers, setReviewers] = useState([]);
+  const [loading,   setLoading]   = useState(true);
 
-  const total     = progress.length;
-  const submitted = progress.filter(p => p.selfAssessmentStatus === 'submitted').length;
-  const inProg    = progress.filter(p => p.selfAssessmentStatus === 'in_progress').length;
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([getProgressSummary(), getAllReviewers()]).then(([prog, revs]) => {
+      setProgress(prog || []);
+      setReviewers(revs || []);
+      setLoading(false);
+    });
+  }, [tick]);
+
+  const total      = progress.length;
+  const submitted  = progress.filter(p => p.selfAssessmentStatus === 'submitted').length;
+  const inProg     = progress.filter(p => p.selfAssessmentStatus === 'in_progress').length;
   const notStarted = progress.filter(p => p.selfAssessmentStatus === 'not_started').length;
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading progress…</div>;
 
   return (
     <div>
       <PageHeader title="Track Progress" subtitle="Monitor assessment completion status for every employee." />
 
-      {/* Summary stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Employees" value={total} icon={Users} color="indigo" />
         <StatCard label="Self-Assess Done" value={submitted} icon={CheckCircle} color="green" />
@@ -38,9 +45,9 @@ export default function AdminProgress() {
       ) : (
         <div className="space-y-4">
           {progress.map(p => {
-            const empReviewers = reviewers.filter(r => r.forEmployeeId === p.employee.id);
-            const approvedRevs = empReviewers.filter(r => r.status === 'approved');
-            const pendingRevs  = empReviewers.filter(r => r.status === 'pending');
+            const empReviewers = reviewers.filter(r => r.employeeId === p.employee.id);
+            const approvedRevs = empReviewers.filter(r => r.approvalStatus === 'approved');
+            const pendingRevs  = empReviewers.filter(r => r.approvalStatus === 'pending');
             return (
               <Card key={p.employee.id} className="p-5">
                 <div className="flex items-start gap-4 mb-4">
@@ -58,23 +65,17 @@ export default function AdminProgress() {
                   </div>
                 </div>
 
-                {/* Progress bars */}
                 <div className="grid sm:grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <ProgressBar value={p.selfAssessmentProgress} label="Self-Assessment Progress" className="mb-0" />
-                  </div>
-                  <div>
-                    <ProgressBar
-                      value={approvedRevs.length ? p.completedReviewCount : 0}
-                      max={Math.max(approvedRevs.length, 1)}
-                      label="Reviews Completed"
-                      color="green"
-                      className="mb-0"
-                    />
-                  </div>
+                  <ProgressBar value={p.selfAssessmentProgress} label="Self-Assessment Progress" className="mb-0" />
+                  <ProgressBar
+                    value={approvedRevs.length ? p.completedReviewCount : 0}
+                    max={Math.max(approvedRevs.length, 1)}
+                    label="Reviews Completed"
+                    color="green"
+                    className="mb-0"
+                  />
                 </div>
 
-                {/* Detail pills */}
                 <div className="flex gap-2 flex-wrap text-xs">
                   <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg font-medium">{p.assignmentCount} assignment{p.assignmentCount !== 1 ? 's' : ''}</span>
                   <span className={`px-2.5 py-1 rounded-lg font-medium ${p.nominationsSubmitted ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
@@ -87,7 +88,6 @@ export default function AdminProgress() {
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg font-medium">{p.completedReviewCount} review{p.completedReviewCount !== 1 ? 's' : ''} received</span>
                 </div>
 
-                {/* Reviewer breakdown */}
                 {empReviewers.length > 0 && (
                   <div className="mt-4 border-t border-gray-100 pt-4">
                     <p className="text-xs font-semibold text-gray-500 mb-2">Reviewer Status</p>
@@ -103,7 +103,7 @@ export default function AdminProgress() {
                           </div>
                           <div className="flex items-center gap-2">
                             <Badge variant="info" size="xs">{rev.category}</Badge>
-                            <Badge variant={STATUS_BADGE[rev.status] || 'default'} size="xs">{rev.status}</Badge>
+                            <Badge variant={STATUS_BADGE[rev.approvalStatus] || 'default'} size="xs">{rev.approvalStatus}</Badge>
                           </div>
                         </div>
                       ))}

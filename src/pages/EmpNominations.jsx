@@ -1,19 +1,19 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   getEmployeeByUserId, getAssignmentsByEmployee, getNominations,
   saveNominationGroup, submitNominations
-} from '../store/db';
+} from '../lib/supabase';
 import { Button, Card, Input, Alert, Badge, PageHeader, Modal } from '../components/UI';
-import { Plus, Trash2, Users, Send, CheckCircle, User, Edit3 } from 'lucide-react';
+import { Plus, Trash2, Send, CheckCircle, Edit3 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 const CATEGORIES = [
-  { id: 'sponsor',    label: 'Sponsor',          max: 1, color: 'purple', desc: 'Project sponsor who commissioned/funded the work' },
-  { id: 'supervisor', label: 'Supervisor(s)',     max: 2, color: 'blue',   desc: 'Direct line manager or supervisors on this assignment' },
-  { id: 'peer',       label: 'Peers',             max: 3, color: 'indigo', desc: 'Colleagues at a similar level who worked with you' },
-  { id: 'client',     label: 'Client',            max: 2, color: 'green',  desc: 'Client-side contacts who can provide feedback' },
-  { id: 'teamMember', label: 'Team Members',      max: 3, color: 'amber',  desc: 'Direct reports or team members you led on this assignment' },
+  { id: 'sponsor',    label: 'Sponsor',       max: 1, color: 'purple', desc: 'Project sponsor who commissioned/funded the work' },
+  { id: 'supervisor', label: 'Supervisor(s)', max: 2, color: 'blue',   desc: 'Direct line manager or supervisors on this assignment' },
+  { id: 'peer',       label: 'Peers',         max: 3, color: 'indigo', desc: 'Colleagues at a similar level who worked with you' },
+  { id: 'client',     label: 'Client',        max: 2, color: 'green',  desc: 'Client-side contacts who can provide feedback' },
+  { id: 'teamMember', label: 'Team Members',  max: 3, color: 'amber',  desc: 'Direct reports or team members you led on this assignment' },
 ];
 
 const EMPTY_PERSON = { id: '', name: '', role: '', department: '', designation: '', email: '', phone: '' };
@@ -51,16 +51,47 @@ function PersonForm({ initial, onSave, onCancel, categoryLabel }) {
 }
 
 export default function EmpNominations({ onNavigate }) {
-  const { currentUser, refresh } = useApp();
-  const employee    = useMemo(() => getEmployeeByUserId(currentUser.id), [currentUser]);
-  const assignments = useMemo(() => employee ? getAssignmentsByEmployee(employee.id) : [], [employee, currentUser]);
-  const nominations = useMemo(() => employee ? getNominations(employee.id) : null, [employee, currentUser]);
-
-  const [activeAssign, setActiveAssign] = useState(assignments[0]?.id || null);
-  const [modal, setModal] = useState(null); // { category, person? }
+  const { currentUser, tick } = useApp();
+  const [employee,    setEmployee]    = useState(null);
+  const [assignments, setAssignments] = useState([]);
+  const [nominations, setNominations] = useState(null);
+  const [activeAssign, setActiveAssign] = useState(null);
+  const [modal,       setModal]       = useState(null);
   const [submitModal, setSubmitModal] = useState(false);
+  const [loading,     setLoading]     = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const empRef = useRef(null);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    setLoading(true);
+    getEmployeeByUserId(currentUser.id).then(async emp => {
+      setEmployee(emp);
+      empRef.current = emp;
+      if (emp) {
+        const [asgns, noms] = await Promise.all([
+          getAssignmentsByEmployee(emp.id),
+          getNominations(emp.id),
+        ]);
+        setAssignments(asgns || []);
+        setNominations(noms);
+        if (asgns?.length > 0 && !activeAssign) setActiveAssign(asgns[0].id);
+      }
+      setLoading(false);
+    });
+  }, [currentUser?.id, tick]);
+
+  const reload = async () => {
+    const emp = empRef.current;
+    if (emp) {
+      const noms = await getNominations(emp.id);
+      setNominations(noms);
+    }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading nominations…</div>;
   if (!employee) return <Alert type="warning">Please complete your profile first.</Alert>;
+
   if (assignments.length === 0) {
     return (
       <div>
@@ -84,27 +115,31 @@ export default function EmpNominations({ onNavigate }) {
 
   const getCatPeople = (assignId, catId) => nominations?.byAssignment?.[assignId]?.[catId] || [];
 
-  const handleSavePerson = (assignId, catId, person) => {
+  const handleSavePerson = async (assignId, catId, person) => {
+    setSaving(true);
     const current = getCatPeople(assignId, catId);
     const exists = current.findIndex(p => p.id === person.id);
     const updated = exists >= 0 ? current.map(p => p.id === person.id ? person : p) : [...current, person];
-    saveNominationGroup(employee.id, assignId, catId, updated);
-    refresh();
+    await saveNominationGroup(employee.id, assignId, catId, updated);
+    await reload();
+    setSaving(false);
     setModal(null);
   };
 
-  const handleDelete = (assignId, catId, personId) => {
+  const handleDelete = async (assignId, catId, personId) => {
     const updated = getCatPeople(assignId, catId).filter(p => p.id !== personId);
-    saveNominationGroup(employee.id, assignId, catId, updated);
-    refresh();
+    await saveNominationGroup(employee.id, assignId, catId, updated);
+    await reload();
   };
 
   const totalNominated = assignments.reduce((sum, a) =>
     sum + CATEGORIES.reduce((s, c) => s + getCatPeople(a.id, c.id).length, 0), 0);
 
-  const handleSubmit = () => {
-    submitNominations(employee.id);
-    refresh();
+  const handleSubmit = async () => {
+    setSaving(true);
+    await submitNominations(employee.id);
+    await reload();
+    setSaving(false);
     setSubmitModal(false);
   };
 
@@ -122,7 +157,6 @@ export default function EmpNominations({ onNavigate }) {
         }
       />
 
-      {/* Assignment tabs */}
       {assignments.length > 1 && (
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
           {assignments.map(a => (
@@ -137,13 +171,10 @@ export default function EmpNominations({ onNavigate }) {
 
       {assignments.filter(a => !activeAssign || a.id === activeAssign).map(assign => (
         <div key={assign.id}>
-          {/* Assignment info banner */}
           <div className="bg-gradient-to-r from-indigo-50 to-white rounded-2xl border border-indigo-100 p-4 mb-4">
             <div className="text-sm font-bold text-gray-800">{assign.title}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{assign.role} · {assign.organization} · {assign.sector}</div>
-            <div className="text-xs text-indigo-600 mt-1 font-medium">
-              Nominate at least one person per relevant category below.
-            </div>
+            <div className="text-xs text-gray-500 mt-0.5">{assign.role} · {assign.clientOrg} · {assign.sector}</div>
+            <div className="text-xs text-indigo-600 mt-1 font-medium">Nominate at least one person per relevant category below.</div>
           </div>
 
           <div className="space-y-4">
@@ -202,7 +233,6 @@ export default function EmpNominations({ onNavigate }) {
         </div>
       ))}
 
-      {/* Add person modal */}
       {modal && (
         <Modal open={!!modal} onClose={() => setModal(null)} title={`Add ${modal.catLabel}`} size="lg">
           <PersonForm
@@ -214,13 +244,12 @@ export default function EmpNominations({ onNavigate }) {
         </Modal>
       )}
 
-      {/* Submit modal */}
       <Modal open={submitModal} onClose={() => setSubmitModal(false)} title="Submit Nominations for Review?">
         <p className="text-sm text-gray-600 mb-2">You are about to submit <strong>{totalNominated} reviewer nominations</strong> for administrator approval.</p>
         <p className="text-sm text-gray-500 mb-4">Once the admin approves profiles, reviewers will receive access to complete their assessments.</p>
         <div className="flex gap-3 justify-end">
           <Button variant="secondary" onClick={() => setSubmitModal(false)}>Cancel</Button>
-          <Button variant="success" onClick={handleSubmit}><Send size={14} />Submit Nominations</Button>
+          <Button variant="success" onClick={handleSubmit} disabled={saving}><Send size={14} />{saving ? 'Submitting…' : 'Submit Nominations'}</Button>
         </div>
       </Modal>
     </div>

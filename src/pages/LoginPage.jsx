@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Star, Eye, EyeOff, AlertCircle, Mail, KeyRound, CheckCircle, ArrowLeft, Copy } from 'lucide-react';
-import { authenticate, requestPasswordReset, changePassword } from '../store/db';
+import { authenticate, requestPasswordReset, changePassword } from '../lib/supabase';
 import { useApp } from '../store/AppContext';
 import { Button, Input, Alert, Divider } from '../components/UI';
 
@@ -15,8 +15,7 @@ function ForgotPassword({ onBack }) {
     e.preventDefault();
     if (!email.trim()) return;
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600)); // simulate network
-    const res = requestPasswordReset(email.trim());
+    const res = await requestPasswordReset(email.trim());
     setResult(res);
     setLoading(false);
   };
@@ -123,10 +122,10 @@ function ChangePasswordBanner({ userId, onDone }) {
   const [done, setDone]   = useState(false);
   const { refresh } = useApp();
 
-  const handleChange = () => {
+  const handleChange = async () => {
     if (form.password.length < 6) { setError('Minimum 6 characters.'); return; }
     if (form.password !== form.confirm) { setError('Passwords do not match.'); return; }
-    changePassword(userId, form.password);
+    await changePassword(userId, form.password);
     refresh();
     setDone(true);
     setTimeout(onDone, 1500);
@@ -172,8 +171,7 @@ export default function LoginPage({ onRegister }) {
     setError('');
     if (!form.email || !form.password) { setError('Please enter your email and password.'); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 400));
-    const user = authenticate(form.email.trim(), form.password);
+    const user = await authenticate(form.email.trim(), form.password);
     if (!user) { setError('Invalid email or password. Please try again.'); setLoading(false); return; }
     // If password was reset, show change password prompt first
     if (user.passwordReset) {
