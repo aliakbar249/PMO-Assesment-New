@@ -541,7 +541,7 @@ export async function getTemplateForEmployee(employee) {
     const { data: templates, error: tmplError } = await supabase
       .from('assessment_templates')
       .select('*, assessment_template_sections(section_id)')
-      .eq('active', true);
+      .neq('active', false);
 
     if (tmplError) return getTemplates();
 
@@ -588,36 +588,43 @@ export async function getTemplateForEmployee(employee) {
 export async function getAssessmentTemplates() {
   const { data: templates, error } = await supabase
     .from('assessment_templates')
-    .select('*, assessment_template_sections(section_id)')
-    .eq('active', true)
+    .select('*, assessment_template_sections(section_id, order_index)')
+    .neq('active', false)          // accepts TRUE and NULL, excludes only FALSE
     .order('created_at', { ascending: true });
 
   if (error) {
-    // Table may not exist yet; return empty array gracefully
-    console.warn('assessment_templates table not found:', error.message);
+    console.warn('getAssessmentTemplates error:', error.message);
     return [];
   }
 
   const allSections = await getTemplates();
 
-  return (templates || []).map(t => ({
-    id: t.id,
-    name: t.name,
-    description: t.description,
-    isDefault: t.is_default,
-    targetLevels: t.target_levels || [],
-    targetDepartments: t.target_departments || [],
-    sectionIds: (t.assessment_template_sections || []).map(s => s.section_id),
-    sections: allSections.filter(s =>
-      (t.assessment_template_sections || []).some(ts => ts.section_id === s.id)
-    ),
-    createdAt: t.created_at,
-    updatedAt: t.updated_at,
-  }));
+  return (templates || []).map(t => {
+    const sectionIds = ((t.assessment_template_sections || [])
+      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+      .map(s => s.section_id));
+    return {
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      isDefault: t.is_default,
+      targetLevels: t.target_levels || [],
+      targetDepartments: t.target_departments || [],
+      sectionIds,
+      sections: sectionIds
+        .map(sid => allSections.find(s => s.id === sid))
+        .filter(Boolean),
+      createdAt: t.created_at,
+      updatedAt: t.updated_at,
+    };
+  });
 }
 
 export async function saveAssessmentTemplates(templates) {
-  if (!templates || templates.length === 0) return;
+  if (!templates || templates.length === 0) return { success: false, error: 'No templates provided' };
+
+  const errors = [];
+
   for (const tmpl of templates) {
     const row = {
       name: tmpl.name,
@@ -629,25 +636,50 @@ export async function saveAssessmentTemplates(templates) {
       updated_at: nowIso(),
     };
 
-    if (tmpl.id) {
-      await supabase.from('assessment_templates').update(row).eq('id', tmpl.id);
-      // Re-sync section links
-      await supabase.from('assessment_template_sections').delete().eq('template_id', tmpl.id);
+    let templateId = tmpl.id || null;
+
+    if (templateId) {
+      // ── UPDATE existing template ──────────────────────────────
+      const { error: ue } = await supabase
+        .from('assessment_templates')
+        .update(row)
+        .eq('id', templateId);
+      if (ue) { errors.push(ue.message); console.error('update template error:', ue); continue; }
+
+      // Delete old section links then re-insert
+      const { error: de } = await supabase
+        .from('assessment_template_sections')
+        .delete()
+        .eq('template_id', templateId);
+      if (de) { errors.push(de.message); console.error('delete sections error:', de); continue; }
+
     } else {
-      tmpl.id = genId();
-      await supabase.from('assessment_templates').insert({ id: tmpl.id, ...row, created_at: nowIso() });
+      // ── INSERT new template ───────────────────────────────────
+      templateId = genId();
+      const { error: ie } = await supabase
+        .from('assessment_templates')
+        .insert({ id: templateId, ...row, created_at: nowIso() });
+      if (ie) { errors.push(ie.message); console.error('insert template error:', ie); continue; }
     }
-    // Insert section links
+
+    // Insert section links (always after delete/insert above)
     if (tmpl.sectionIds && tmpl.sectionIds.length > 0) {
       const sectionRows = tmpl.sectionIds.map((sid, i) => ({
         id: genId(),
-        template_id: tmpl.id,
+        template_id: templateId,
         section_id: sid,
         order_index: i,
       }));
-      await supabase.from('assessment_template_sections').insert(sectionRows);
+      const { error: se } = await supabase
+        .from('assessment_template_sections')
+        .insert(sectionRows);
+      if (se) { errors.push(se.message); console.error('insert section links error:', se); }
     }
   }
+
+  return errors.length === 0
+    ? { success: true }
+    : { success: false, error: errors.join('; ') };
 }
 
 export async function deleteAssessmentTemplate(templateId) {

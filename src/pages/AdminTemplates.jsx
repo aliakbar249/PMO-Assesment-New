@@ -7,7 +7,7 @@ import {
 import { Button, Card, Input, Badge, Modal, PageHeader, Alert } from '../components/UI';
 import {
   Plus, Trash2, Save, CheckCircle, GripVertical, Settings,
-  Layers, ChevronDown, ChevronUp, Edit3, Copy, Target, Users
+  Layers, ChevronDown, ChevronUp, Edit3, Copy, Target, Users, AlertCircle
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -142,7 +142,7 @@ function AssessmentTemplateCard({ template, allSections, onEdit, onDelete }) {
 }
 
 // ─── Assessment Template Form Modal ───────────────────────────
-function TemplateFormModal({ template, allSections, onSave, onClose }) {
+function TemplateFormModal({ template, allSections, onSave, onClose, saving, saveError }) {
   const [form, setForm] = useState({
     id: template?.id || null,
     name: template?.name || '',
@@ -265,13 +265,19 @@ function TemplateFormModal({ template, allSections, onSave, onClose }) {
         </div>
       </div>
 
+      {saveError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex items-start gap-2">
+          <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
       <div className="flex gap-3 justify-end pt-2">
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
         <Button
           onClick={() => onSave(form)}
-          disabled={!form.name.trim() || form.sectionIds.length === 0}
+          disabled={!form.name.trim() || form.sectionIds.length === 0 || saving}
         >
-          <Save size={14} />{template ? 'Update Template' : 'Create Template'}
+          <Save size={14} />{saving ? 'Saving…' : template ? 'Update Template' : 'Create Template'}
         </Button>
       </div>
     </div>
@@ -297,6 +303,8 @@ export default function AdminTemplates() {
   // Assessment template modals
   const [templateModal, setTemplateModal] = useState(null); // null | 'new' | templateObj
   const [deleteTemplateModal, setDeleteTemplateModal] = useState(null);
+  const [templateSaveError, setTemplateSaveError] = useState('');
+  const [templateSaved, setTemplateSaved] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -376,11 +384,21 @@ export default function AdminTemplates() {
   // ── Assessment Template handlers ───────────────────────────
   const handleSaveAssessmentTemplate = async (form) => {
     setSavingTemplates(true);
-    await saveAssessmentTemplates([form]);
+    setTemplateSaveError('');
+    const result = await saveAssessmentTemplates([form]);
+    if (result && !result.success) {
+      setSavingTemplates(false);
+      setTemplateSaveError(result.error || 'Failed to save template. Check console for details.');
+      return; // keep modal open so admin can see the error
+    }
+    // Reload the list fresh from DB
     const atpls = await getAssessmentTemplates();
     setAssessmentTemplates(atpls || []);
-    setTemplateModal(null);
     setSavingTemplates(false);
+    setTemplateModal(null);
+    setTemplateSaveError('');
+    setTemplateSaved(true);
+    setTimeout(() => setTemplateSaved(false), 3000);
     refresh();
   };
 
@@ -543,6 +561,11 @@ export default function AdminTemplates() {
           <Alert type="info" className="mb-4">
             <strong>Assessment Templates</strong> define which sections are shown for each assessment cycle. Create different templates for different employee levels or departments. Employees are automatically matched to a template based on their profile; the <em>Standard Assessment</em> is the fallback for everyone.
           </Alert>
+          {templateSaved && (
+            <Alert type="success" className="mb-4">
+              <div className="flex items-center gap-2"><CheckCircle size={14} />Template saved successfully.</div>
+            </Alert>
+          )}
 
           <div className="space-y-3">
             {assessmentTemplates.map(tmpl => (
@@ -632,7 +655,7 @@ export default function AdminTemplates() {
       {/* Assessment Template Modal (new / edit) */}
       <Modal
         open={!!templateModal}
-        onClose={() => setTemplateModal(null)}
+        onClose={() => { setTemplateModal(null); setTemplateSaveError(''); }}
         title={templateModal === 'new' ? 'Create Assessment Template' : 'Edit Assessment Template'}
         size="lg"
       >
@@ -641,7 +664,9 @@ export default function AdminTemplates() {
             template={templateModal === 'new' ? null : templateModal}
             allSections={sections}
             onSave={handleSaveAssessmentTemplate}
-            onClose={() => setTemplateModal(null)}
+            onClose={() => { setTemplateModal(null); setTemplateSaveError(''); }}
+            saving={savingTemplates}
+            saveError={templateSaveError}
           />
         )}
       </Modal>
