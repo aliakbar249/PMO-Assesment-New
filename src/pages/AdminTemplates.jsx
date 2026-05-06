@@ -338,7 +338,7 @@ export default function AdminTemplates() {
       si !== sIdx ? sec : {
         ...sec,
         statements: [...sec.statements, {
-          id: `stmt_${uuidv4().substring(0, 8)}`,
+          id: uuidv4(),
           text: 'New statement — click to edit',
           selfTip: '',
           reviewerTip: '',
@@ -364,9 +364,8 @@ export default function AdminTemplates() {
 
   const handleAddSection = () => {
     if (!newSection.title.trim()) return;
-    const id = newSection.title.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z_]/g, '');
     setSections(prev => [...prev, {
-      id: `${id}_${uuidv4().substring(0, 6)}`,
+      id: uuidv4(),
       ...newSection,
       statements: []
     }]);
