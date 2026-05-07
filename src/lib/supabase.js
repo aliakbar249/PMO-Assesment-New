@@ -467,9 +467,29 @@ export async function getTemplates() {
 }
 
 export async function saveTemplates(templates) {
+  const keepSectionIds  = templates.map(s => s.id);
+
+  // ── 1. Delete sections that were removed ──────────────────────
+  // Fetch all existing section IDs, then delete whichever are not in keepSectionIds
+  const { data: existingSections } = await supabase
+    .from('template_sections')
+    .select('id');
+
+  const sectionsToDelete = (existingSections || [])
+    .map(r => r.id)
+    .filter(id => !keepSectionIds.includes(id));
+
+  if (sectionsToDelete.length > 0) {
+    // Deleting a section cascades to its statements via FK in most setups,
+    // but we also explicitly clean statements to be safe.
+    await supabase.from('template_statements').delete().in('section_id', sectionsToDelete);
+    await supabase.from('template_sections').delete().in('id', sectionsToDelete);
+  }
+
+  // ── 2. Upsert remaining sections + sync their statements ──────
   for (let si = 0; si < templates.length; si++) {
     const sec = templates[si];
-    // Upsert section
+
     await supabase.from('template_sections').upsert({
       id: sec.id,
       name: sec.title,
@@ -479,7 +499,22 @@ export async function saveTemplates(templates) {
       order_index: si,
       active: true,
     });
-    // Upsert statements
+
+    const keepStatementIds = (sec.statements || []).map(st => st.id).filter(Boolean);
+
+    // Delete statements removed from this section
+    if (keepStatementIds.length > 0) {
+      await supabase
+        .from('template_statements')
+        .delete()
+        .eq('section_id', sec.id)
+        .not('id', 'in', `(${keepStatementIds.map(id => `"${id}"`).join(',')})`);
+    } else {
+      // No statements left — delete all for this section
+      await supabase.from('template_statements').delete().eq('section_id', sec.id);
+    }
+
+    // Upsert current statements
     for (let i = 0; i < (sec.statements || []).length; i++) {
       const st = sec.statements[i];
       await supabase.from('template_statements').upsert({
