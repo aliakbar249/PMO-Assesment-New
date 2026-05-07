@@ -412,14 +412,21 @@ export async function updateEmployee(empId, updates) {
 
 // ─── Admin: Assign / remove assessment template for an employee ─
 // Uses a dedicated employee_template_assignments table (no ALTER TABLE needed)
+// REQUIRES this table to exist — run the migration SQL in Supabase Dashboard if missing.
 export async function assignTemplateToEmployee(empId, templateId) {
   try {
     if (!templateId) {
       // Remove assignment (revert to default)
-      await supabase
+      const { error } = await supabase
         .from('employee_template_assignments')
         .delete()
         .eq('employee_id', empId);
+      if (error) {
+        if (error.message?.includes('schema cache') || error.code === 'PGRST204' || error.code === '42P01') {
+          return { success: false, error: 'MISSING_TABLE' };
+        }
+        return { success: false, error: error.message };
+      }
       return { success: true };
     }
     // Upsert: one row per employee (UNIQUE constraint on employee_id)
@@ -431,6 +438,9 @@ export async function assignTemplateToEmployee(empId, templateId) {
       );
     if (error) {
       console.error('assignTemplateToEmployee error:', error);
+      if (error.message?.includes('schema cache') || error.code === 'PGRST204' || error.code === '42P01') {
+        return { success: false, error: 'MISSING_TABLE' };
+      }
       return { success: false, error: error.message };
     }
     return { success: true };
@@ -442,22 +452,31 @@ export async function assignTemplateToEmployee(empId, templateId) {
 
 // ─── Get the assigned template id for a single employee ────────
 export async function getEmployeeTemplateId(empId) {
-  const { data } = await supabase
-    .from('employee_template_assignments')
-    .select('template_id')
-    .eq('employee_id', empId)
-    .maybeSingle();
-  return data?.template_id || null;
+  try {
+    const { data, error } = await supabase
+      .from('employee_template_assignments')
+      .select('template_id')
+      .eq('employee_id', empId)
+      .maybeSingle();
+    if (error) return null; // table missing or other error — fall back silently
+    return data?.template_id || null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Bulk-load template assignments for all employees ──────────
 export async function getAllEmployeeTemplateAssignments() {
-  const { data, error } = await supabase
-    .from('employee_template_assignments')
-    .select('employee_id, template_id');
-  if (error) return {};
-  // Return a map: { employeeId -> templateId }
-  return Object.fromEntries((data || []).map(r => [r.employee_id, r.template_id]));
+  try {
+    const { data, error } = await supabase
+      .from('employee_template_assignments')
+      .select('employee_id, template_id');
+    if (error) return {}; // table missing — return empty map silently
+    // Return a map: { employeeId -> templateId }
+    return Object.fromEntries((data || []).map(r => [r.employee_id, r.template_id]));
+  } catch {
+    return {};
+  }
 }
 
 export async function updateEmployeeStatus(empId, status) {

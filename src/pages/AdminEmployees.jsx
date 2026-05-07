@@ -278,7 +278,11 @@ function EmployeeModal({ employee, onSave, onClose, onTemplateAssigned }) {
     const result = await assignTemplateToEmployee(employee.id, selectedTmpl || null);
     setTmplSaving(false);
     if (!result.success) {
-      setTmplError(result.error || 'Failed to assign template.');
+      if (result.error === 'MISSING_TABLE') {
+        setTmplError('__MISSING_TABLE__');
+      } else {
+        setTmplError(result.error || 'Failed to assign template.');
+      }
       return;
     }
     setTmplSaved(true);
@@ -425,11 +429,44 @@ function EmployeeModal({ employee, onSave, onClose, onTemplateAssigned }) {
               <div className="flex items-center gap-2"><CheckCircle size={14} />Template assigned successfully.</div>
             </Alert>
           )}
-          {tmplError && (
+          {tmplError === '__MISSING_TABLE__' ? (
+            <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 space-y-3">
+              <div className="flex items-center gap-2 font-semibold text-amber-800 text-sm">
+                <AlertCircle size={16} /> One-time database migration required
+              </div>
+              <p className="text-xs text-amber-700">
+                The <code className="bg-amber-100 px-1 rounded">employee_template_assignments</code> table
+                doesn't exist in your Supabase project yet. Run the SQL below in{' '}
+                <strong>Supabase Dashboard → SQL Editor → New Query</strong>, then try again.
+              </p>
+              <pre className="text-xs bg-white border border-amber-200 rounded-xl p-3 overflow-x-auto text-gray-700 whitespace-pre-wrap">{`CREATE TABLE IF NOT EXISTS employee_template_assignments (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+  template_id UUID REFERENCES assessment_templates(id) ON DELETE CASCADE,
+  assigned_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(employee_id)
+);
+
+ALTER TABLE employee_template_assignments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all" ON employee_template_assignments;
+CREATE POLICY "allow_all" ON employee_template_assignments
+  FOR ALL USING (true) WITH CHECK (true);`}</pre>
+              <button
+                onClick={() => {
+                  const sql = `CREATE TABLE IF NOT EXISTS employee_template_assignments (\n  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),\n  employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,\n  template_id UUID REFERENCES assessment_templates(id) ON DELETE CASCADE,\n  assigned_at TIMESTAMPTZ DEFAULT NOW(),\n  updated_at  TIMESTAMPTZ DEFAULT NOW(),\n  UNIQUE(employee_id)\n);\n\nALTER TABLE employee_template_assignments ENABLE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS "allow_all" ON employee_template_assignments;\nCREATE POLICY "allow_all" ON employee_template_assignments\n  FOR ALL USING (true) WITH CHECK (true);`;
+                  navigator.clipboard?.writeText(sql).catch(() => {});
+                }}
+                className="text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 w-fit"
+              >
+                <Copy size={12} /> Copy SQL
+              </button>
+            </div>
+          ) : tmplError ? (
             <Alert type="error">
               <div className="flex items-center gap-2"><AlertCircle size={14} />{tmplError}</div>
             </Alert>
-          )}
+          ) : null}
 
           {loadingTmpl ? (
             <div className="text-center py-6 text-sm text-gray-400">Loading templates…</div>
