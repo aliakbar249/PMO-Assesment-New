@@ -406,22 +406,58 @@ export async function updateEmployee(empId, updates) {
   if (updates.manager     !== undefined) row.manager       = updates.manager;
   if (updates.status      !== undefined) row.status        = updates.status;
   if (updates.profileComplete !== undefined) row.profile_complete = updates.profileComplete;
-  if (updates.templateId  !== undefined) row.template_id  = updates.templateId || null;
   row.updated_at = nowIso();
   await supabase.from('employees').update(row).eq('id', empId);
 }
 
-// ─── Admin: Assign assessment template to an employee ──────────
+// ─── Admin: Assign / remove assessment template for an employee ─
+// Uses a dedicated employee_template_assignments table (no ALTER TABLE needed)
 export async function assignTemplateToEmployee(empId, templateId) {
-  const { error } = await supabase
-    .from('employees')
-    .update({ template_id: templateId || null, updated_at: nowIso() })
-    .eq('id', empId);
-  if (error) {
-    console.error('assignTemplateToEmployee error:', error);
-    return { success: false, error: error.message };
+  try {
+    if (!templateId) {
+      // Remove assignment (revert to default)
+      await supabase
+        .from('employee_template_assignments')
+        .delete()
+        .eq('employee_id', empId);
+      return { success: true };
+    }
+    // Upsert: one row per employee (UNIQUE constraint on employee_id)
+    const { error } = await supabase
+      .from('employee_template_assignments')
+      .upsert(
+        { employee_id: empId, template_id: templateId, updated_at: nowIso() },
+        { onConflict: 'employee_id' }
+      );
+    if (error) {
+      console.error('assignTemplateToEmployee error:', error);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (e) {
+    console.error('assignTemplateToEmployee exception:', e);
+    return { success: false, error: e.message };
   }
-  return { success: true };
+}
+
+// ─── Get the assigned template id for a single employee ────────
+export async function getEmployeeTemplateId(empId) {
+  const { data } = await supabase
+    .from('employee_template_assignments')
+    .select('template_id')
+    .eq('employee_id', empId)
+    .maybeSingle();
+  return data?.template_id || null;
+}
+
+// ─── Bulk-load template assignments for all employees ──────────
+export async function getAllEmployeeTemplateAssignments() {
+  const { data, error } = await supabase
+    .from('employee_template_assignments')
+    .select('employee_id, template_id');
+  if (error) return {};
+  // Return a map: { employeeId -> templateId }
+  return Object.fromEntries((data || []).map(r => [r.employee_id, r.template_id]));
 }
 
 export async function updateEmployeeStatus(empId, status) {
@@ -450,7 +486,8 @@ function mapEmployee(row) {
     manager: row.manager,
     status: row.status,
     profileComplete: row.profile_complete,
-    templateId: row.template_id || null,
+    // templateId is loaded separately via employee_template_assignments table
+    templateId: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -548,90 +585,84 @@ export async function saveTemplates(templates) {
 export async function getTemplateForEmployee(employee) {
   if (!employee?.id) return getTemplates();
 
-  // Check if employee has a custom template assigned via assessment_templates
-  const { data: assignedTemplate, error: atError } = await supabase
-    .from('assessment_templates')
-    .select('*, assessment_template_sections(section_id)')
-    .eq('id', employee.templateId || '')
+  // ── Step 1: Check direct assignment in employee_template_assignments ──
+  const { data: assignment } = await supabase
+    .from('employee_template_assignments')
+    .select('template_id')
+    .eq('employee_id', employee.id)
     .maybeSingle();
 
-  if (atError) {
-    // Tables may not exist yet
-    return getTemplates();
+  const directTemplateId = assignment?.template_id || null;
+
+  if (directTemplateId) {
+    const sections = await sectionsForTemplateId(directTemplateId);
+    if (sections) return sections;
   }
 
-  if (assignedTemplate && assignedTemplate.assessment_template_sections?.length > 0) {
-    const sectionIds = assignedTemplate.assessment_template_sections.map(s => s.section_id);
-    const { data: sections } = await supabase
-      .from('template_sections')
-      .select('*, template_statements(*)')
-      .in('id', sectionIds)
-      .eq('active', true)
-      .order('order_index', { ascending: true });
-
-    return (sections || []).map(sec => ({
-      id: sec.id,
-      title: sec.name,
-      description: sec.description,
-      selfTip: sec.self_tip,
-      reviewerTip: sec.reviewer_tip,
-      statements: ((sec.template_statements || [])
-        .sort((a, b) => a.order_index - b.order_index))
-        .map(st => ({
-          id: st.id,
-          text: st.text,
-          selfTip: st.self_tip,
-          reviewerTip: st.reviewer_tip,
-        })),
-    }));
-  }
-
-  // Try level/department based template matching
+  // ── Step 2: Level / department auto-matching (non-default templates) ──
   if (employee.level || employee.department) {
-    const { data: templates, error: tmplError } = await supabase
+    const { data: templates } = await supabase
       .from('assessment_templates')
       .select('*, assessment_template_sections(section_id)')
       .neq('active', false);
 
-    if (tmplError) return getTemplates();
-
-    const matchedTemplate = (templates || []).find(t => {
-      const levels = t.target_levels ? t.target_levels : [];
-      const depts  = t.target_departments ? t.target_departments : [];
+    const matched = (templates || []).find(t => {
+      const levels = t.target_levels || [];
+      const depts  = t.target_departments || [];
       const levelMatch = levels.length === 0 || levels.includes(employee.level);
-      const deptMatch  = depts.length === 0  || depts.includes(employee.department);
+      const deptMatch  = depts.length  === 0 || depts.includes(employee.department);
       return levelMatch && deptMatch && !t.is_default;
     });
 
-    if (matchedTemplate && matchedTemplate.assessment_template_sections?.length > 0) {
-      const sectionIds = matchedTemplate.assessment_template_sections.map(s => s.section_id);
-      const { data: sections } = await supabase
-        .from('template_sections')
-        .select('*, template_statements(*)')
-        .in('id', sectionIds)
-        .eq('active', true)
-        .order('order_index', { ascending: true });
-
-      return (sections || []).map(sec => ({
-        id: sec.id,
-        title: sec.name,
-        description: sec.description,
-        selfTip: sec.self_tip,
-        reviewerTip: sec.reviewer_tip,
-        statements: ((sec.template_statements || [])
-          .sort((a, b) => a.order_index - b.order_index))
-          .map(st => ({
-            id: st.id,
-            text: st.text,
-            selfTip: st.self_tip,
-            reviewerTip: st.reviewer_tip,
-          })),
-      }));
+    if (matched) {
+      const sections = await sectionsForTemplateId(matched.id);
+      if (sections) return sections;
     }
   }
 
-  // Fallback: return all active sections
+  // ── Step 3: Fallback — all active sections ────────────────────
   return getTemplates();
+}
+
+// Helper: fetch and map sections for a given template ID
+async function sectionsForTemplateId(templateId) {
+  const { data: tmpl } = await supabase
+    .from('assessment_templates')
+    .select('assessment_template_sections(section_id, order_index)')
+    .eq('id', templateId)
+    .maybeSingle();
+
+  const links = tmpl?.assessment_template_sections || [];
+  if (links.length === 0) return null;
+
+  const sectionIds = links
+    .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+    .map(l => l.section_id);
+
+  const { data: sections } = await supabase
+    .from('template_sections')
+    .select('*, template_statements(*)')
+    .in('id', sectionIds)
+    .neq('active', false)
+    .order('order_index', { ascending: true });
+
+  if (!sections || sections.length === 0) return null;
+
+  return sections.map(sec => ({
+    id: sec.id,
+    title: sec.name,
+    description: sec.description,
+    selfTip: sec.self_tip,
+    reviewerTip: sec.reviewer_tip,
+    statements: (sec.template_statements || [])
+      .sort((a, b) => a.order_index - b.order_index)
+      .map(st => ({
+        id: st.id,
+        text: st.text,
+        selfTip: st.self_tip,
+        reviewerTip: st.reviewer_tip,
+      })),
+  }));
 }
 
 // ─── Assessment Templates (multi-template management) ──────────

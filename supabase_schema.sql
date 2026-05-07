@@ -36,20 +36,9 @@ CREATE TABLE IF NOT EXISTS employees (
   manager         TEXT,
   status          TEXT DEFAULT 'active',
   profile_complete BOOLEAN DEFAULT FALSE,
-  template_id     UUID REFERENCES assessment_templates(id) ON DELETE SET NULL,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
-
--- Add template_id to existing employees table if it doesn't exist (migration)
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name='employees' AND column_name='template_id'
-  ) THEN
-    ALTER TABLE employees ADD COLUMN template_id UUID REFERENCES assessment_templates(id) ON DELETE SET NULL;
-  END IF;
-END $$;
 
 -- ── Template Sections ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS template_sections (
@@ -174,6 +163,17 @@ CREATE TABLE IF NOT EXISTS assessment_templates (
   updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── Employee Template Assignments (which template is assigned to which employee)
+-- Using a separate table avoids ALTER TABLE on employees (anon key has no DDL rights)
+CREATE TABLE IF NOT EXISTS employee_template_assignments (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+  template_id UUID REFERENCES assessment_templates(id) ON DELETE CASCADE,
+  assigned_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(employee_id)
+);
+
 -- ── Assessment Template Sections (which sections belong to which template)
 CREATE TABLE IF NOT EXISTS assessment_template_sections (
   id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -194,8 +194,9 @@ ALTER TABLE nominations                 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reviewers                   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reviews                     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE password_resets             ENABLE ROW LEVEL SECURITY;
-ALTER TABLE assessment_templates        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE assessment_template_sections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assessment_templates             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assessment_template_sections     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employee_template_assignments    ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "allow_all" ON users;
 DROP POLICY IF EXISTS "allow_all" ON employees;
@@ -209,6 +210,7 @@ DROP POLICY IF EXISTS "allow_all" ON reviews;
 DROP POLICY IF EXISTS "allow_all" ON password_resets;
 DROP POLICY IF EXISTS "allow_all" ON assessment_templates;
 DROP POLICY IF EXISTS "allow_all" ON assessment_template_sections;
+DROP POLICY IF EXISTS "allow_all" ON employee_template_assignments;
 
 CREATE POLICY "allow_all" ON users                       FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all" ON employees                   FOR ALL USING (true) WITH CHECK (true);
@@ -220,8 +222,9 @@ CREATE POLICY "allow_all" ON nominations                 FOR ALL USING (true) WI
 CREATE POLICY "allow_all" ON reviewers                   FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all" ON reviews                     FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all" ON password_resets             FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON assessment_templates        FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "allow_all" ON assessment_template_sections FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON assessment_templates             FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON assessment_template_sections     FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "allow_all" ON employee_template_assignments    FOR ALL USING (true) WITH CHECK (true);
 
 -- ── Seed Admin ─────────────────────────────────────────────────
 INSERT INTO users (id, email, password, role, name)

@@ -4,7 +4,7 @@ import {
   getAllEmployees, updateEmployee, getAssessment, getAssignmentsByEmployee,
   getNominations, getAllReviewers,
   adminCreateEmployee, adminResetPassword, adminSetPassword, adminToggleUserStatus,
-  getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates
+  getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates, getEmployeeTemplateId
 } from '../lib/supabase';
 import {
   Button, Card, Input, Select, Alert, Badge, PageHeader,
@@ -251,13 +251,15 @@ function EmployeeModal({ employee, onSave, onClose, onTemplateAssigned }) {
       getAllReviewers(),
       getUserByEmployeeId(employee.id),
       getAssessmentTemplates(),
-    ]).then(([a, asgns, noms, revs, usr, tmpls]) => {
+      getEmployeeTemplateId(employee.id),   // load current assignment from new table
+    ]).then(([a, asgns, noms, revs, usr, tmpls, currentTmplId]) => {
       setAssessment(a);
       setAssignments(asgns || []);
       setNominations(noms);
       setReviewers((revs || []).filter(r => r.employeeId === employee.id));
       setLinkedUser(usr);
       setAllTemplates(tmpls || []);
+      setSelectedTmpl(currentTmplId || '');  // pre-select the existing assignment
       setLoadingTmpl(false);
     });
   }, [employee.id]);
