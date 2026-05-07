@@ -4,7 +4,7 @@ import {
   getAllEmployees, updateEmployee, getAssessment, getAssignmentsByEmployee,
   getNominations, getAllReviewers,
   adminCreateEmployee, adminResetPassword, adminSetPassword, adminToggleUserStatus,
-  getUserByEmployeeId
+  getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates
 } from '../lib/supabase';
 import {
   Button, Card, Input, Select, Alert, Badge, PageHeader,
@@ -13,7 +13,7 @@ import {
 import {
   Users, Edit3, Eye, UserCheck, UserX, Search, Plus,
   CheckCircle, Clock, AlertCircle, Briefcase, Star, Mail, Phone,
-  Building2, KeyRound, Copy, Power, PowerOff, RefreshCw, Lock
+  Building2, KeyRound, Copy, Power, PowerOff, RefreshCw, Lock, Layers
 } from 'lucide-react';
 
 const DEPARTMENTS = ['Engineering', 'Project Management', 'Operations', 'Finance', 'HR', 'Sales', 'Marketing', 'IT', 'Legal', 'Procurement', 'Other'];
@@ -226,15 +226,22 @@ function PasswordModal({ employee, userId, onClose }) {
 }
 
 // ─── Employee Detail / Edit Modal ──────────────────────────────
-function EmployeeModal({ employee, onSave, onClose }) {
-  const [tab,         setTab]         = useState('details');
-  const [form,        setForm]        = useState({ ...employee });
-  const [saved,       setSaved]       = useState(false);
-  const [assessment,  setAssessment]  = useState(null);
-  const [assignments, setAssignments] = useState([]);
-  const [nominations, setNominations] = useState(null);
-  const [reviewers,   setReviewers]   = useState([]);
-  const [linkedUser,  setLinkedUser]  = useState(null);
+function EmployeeModal({ employee, onSave, onClose, onTemplateAssigned }) {
+  const [tab,            setTab]            = useState('details');
+  const [form,           setForm]           = useState({ ...employee });
+  const [saved,          setSaved]          = useState(false);
+  const [assessment,     setAssessment]     = useState(null);
+  const [assignments,    setAssignments]    = useState([]);
+  const [nominations,    setNominations]    = useState(null);
+  const [reviewers,      setReviewers]      = useState([]);
+  const [linkedUser,     setLinkedUser]     = useState(null);
+  // template tab state
+  const [allTemplates,   setAllTemplates]   = useState([]);
+  const [selectedTmpl,   setSelectedTmpl]   = useState(employee.templateId || '');
+  const [tmplSaving,     setTmplSaving]     = useState(false);
+  const [tmplSaved,      setTmplSaved]      = useState(false);
+  const [tmplError,      setTmplError]      = useState('');
+  const [loadingTmpl,    setLoadingTmpl]    = useState(true);
 
   useEffect(() => {
     Promise.all([
@@ -243,12 +250,15 @@ function EmployeeModal({ employee, onSave, onClose }) {
       getNominations(employee.id),
       getAllReviewers(),
       getUserByEmployeeId(employee.id),
-    ]).then(([a, asgns, noms, revs, usr]) => {
+      getAssessmentTemplates(),
+    ]).then(([a, asgns, noms, revs, usr, tmpls]) => {
       setAssessment(a);
       setAssignments(asgns || []);
       setNominations(noms);
       setReviewers((revs || []).filter(r => r.employeeId === employee.id));
       setLinkedUser(usr);
+      setAllTemplates(tmpls || []);
+      setLoadingTmpl(false);
     });
   }, [employee.id]);
 
@@ -260,15 +270,31 @@ function EmployeeModal({ employee, onSave, onClose }) {
     setTimeout(() => { setSaved(false); setTab('details'); }, 1500);
   };
 
+  const handleAssignTemplate = async () => {
+    setTmplSaving(true);
+    setTmplError('');
+    const result = await assignTemplateToEmployee(employee.id, selectedTmpl || null);
+    setTmplSaving(false);
+    if (!result.success) {
+      setTmplError(result.error || 'Failed to assign template.');
+      return;
+    }
+    setTmplSaved(true);
+    setTimeout(() => setTmplSaved(false), 3000);
+    if (onTemplateAssigned) onTemplateAssigned(employee.id, selectedTmpl || null);
+  };
+
   const approvedRevs = reviewers.filter(r => r.approvalStatus === 'approved');
   const pendingRevs  = reviewers.filter(r => r.approvalStatus === 'pending');
+
+  const currentTemplate = allTemplates.find(t => t.id === selectedTmpl);
 
   return (
     <div>
       <div className="flex gap-1 mb-5 bg-gray-100 p-1 rounded-xl flex-wrap">
-        {[['details', 'Profile'], ['assessment', 'Assessment'], ['edit', 'Edit'], ['password', 'Password']].map(([key, label]) => (
+        {[['details', 'Profile'], ['assessment', 'Assessment'], ['template', 'Template'], ['edit', 'Edit'], ['password', 'Password']].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
-            className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all min-w-[70px] ${tab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all min-w-[60px] ${tab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
           </button>
         ))}
@@ -385,6 +411,116 @@ function EmployeeModal({ employee, onSave, onClose }) {
         </div>
       )}
 
+      {/* ── Template Assignment Tab ── */}
+      {tab === 'template' && (
+        <div className="space-y-4">
+          <Alert type="info">
+            Choose which assessment template this employee will use. Selecting <strong>Standard Assessment</strong> (or leaving blank) applies the default template to everyone.
+          </Alert>
+
+          {tmplSaved && (
+            <Alert type="success">
+              <div className="flex items-center gap-2"><CheckCircle size={14} />Template assigned successfully.</div>
+            </Alert>
+          )}
+          {tmplError && (
+            <Alert type="error">
+              <div className="flex items-center gap-2"><AlertCircle size={14} />{tmplError}</div>
+            </Alert>
+          )}
+
+          {loadingTmpl ? (
+            <div className="text-center py-6 text-sm text-gray-400">Loading templates…</div>
+          ) : (
+            <>
+              {/* Template picker */}
+              <div className="space-y-2">
+                {/* Default / none option */}
+                <label className={`flex items-start gap-3 p-4 border-2 rounded-2xl cursor-pointer transition-all
+                  ${!selectedTmpl ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                  <input
+                    type="radio"
+                    name="template"
+                    value=""
+                    checked={!selectedTmpl}
+                    onChange={() => setSelectedTmpl('')}
+                    className="mt-1 accent-indigo-600"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-800">Standard Assessment</span>
+                      <Badge variant="primary">Default</Badge>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">All sections — applies to every employee unless overridden.</p>
+                  </div>
+                </label>
+
+                {/* Custom templates */}
+                {allTemplates.filter(t => !t.isDefault).map(tmpl => (
+                  <label key={tmpl.id} className={`flex items-start gap-3 p-4 border-2 rounded-2xl cursor-pointer transition-all
+                    ${selectedTmpl === tmpl.id ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                    <input
+                      type="radio"
+                      name="template"
+                      value={tmpl.id}
+                      checked={selectedTmpl === tmpl.id}
+                      onChange={() => setSelectedTmpl(tmpl.id)}
+                      className="mt-1 accent-indigo-600"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-gray-800">{tmpl.name}</span>
+                        <Badge variant="default">{tmpl.sectionIds?.length || 0} sections</Badge>
+                      </div>
+                      {tmpl.description && (
+                        <p className="text-xs text-gray-500 mt-0.5">{tmpl.description}</p>
+                      )}
+                      <div className="flex gap-3 mt-1.5 flex-wrap">
+                        {tmpl.targetLevels?.length > 0 && (
+                          <span className="text-xs text-gray-400">Levels: {tmpl.targetLevels.join(', ')}</span>
+                        )}
+                        {tmpl.targetDepartments?.length > 0 && (
+                          <span className="text-xs text-gray-400">Depts: {tmpl.targetDepartments.join(', ')}</span>
+                        )}
+                      </div>
+                      {/* show included section names */}
+                      {tmpl.sections?.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {tmpl.sections.map(s => (
+                            <span key={s.id} className="px-2 py-0.5 bg-white border border-gray-200 rounded-lg text-xs text-gray-600">{s.title}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                ))}
+
+                {allTemplates.filter(t => !t.isDefault).length === 0 && (
+                  <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    No custom templates created yet. Go to <strong>Templates → Assessment Templates</strong> to create one.
+                  </p>
+                )}
+              </div>
+
+              {/* Current assignment summary */}
+              {selectedTmpl && currentTemplate && (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-600">
+                  <Layers size={12} className="inline mr-1 text-indigo-500" />
+                  Currently selected: <strong>{currentTemplate.name}</strong>
+                  {' '}({currentTemplate.sectionIds?.length || 0} sections)
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button onClick={handleAssignTemplate} disabled={tmplSaving}>
+                  <CheckCircle size={14} />{tmplSaving ? 'Saving…' : 'Assign Template'}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── Edit Profile Tab ── */}
       {tab === 'edit' && (
         <div className="space-y-4">
@@ -470,6 +606,12 @@ export default function AdminEmployees() {
     notify('Employee profile updated.');
     setEmployees(prev => prev.map(e => e.id === empId ? { ...e, ...updates } : e));
     if (viewModal?.id === empId) setViewModal(prev => ({ ...prev, ...updates }));
+  };
+
+  const handleTemplateAssigned = (empId, templateId) => {
+    notify('Assessment template assigned successfully.');
+    setEmployees(prev => prev.map(e => e.id === empId ? { ...e, templateId } : e));
+    if (viewModal?.id === empId) setViewModal(prev => ({ ...prev, templateId }));
   };
 
   // Quick activate / deactivate from list row
@@ -622,6 +764,7 @@ export default function AdminEmployees() {
             employee={viewModal}
             onSave={handleSave}
             onClose={() => setViewModal(null)}
+            onTemplateAssigned={handleTemplateAssigned}
           />
         </Modal>
       )}

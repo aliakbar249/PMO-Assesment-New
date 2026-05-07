@@ -406,8 +406,22 @@ export async function updateEmployee(empId, updates) {
   if (updates.manager     !== undefined) row.manager       = updates.manager;
   if (updates.status      !== undefined) row.status        = updates.status;
   if (updates.profileComplete !== undefined) row.profile_complete = updates.profileComplete;
+  if (updates.templateId  !== undefined) row.template_id  = updates.templateId || null;
   row.updated_at = nowIso();
   await supabase.from('employees').update(row).eq('id', empId);
+}
+
+// ─── Admin: Assign assessment template to an employee ──────────
+export async function assignTemplateToEmployee(empId, templateId) {
+  const { error } = await supabase
+    .from('employees')
+    .update({ template_id: templateId || null, updated_at: nowIso() })
+    .eq('id', empId);
+  if (error) {
+    console.error('assignTemplateToEmployee error:', error);
+    return { success: false, error: error.message };
+  }
+  return { success: true };
 }
 
 export async function updateEmployeeStatus(empId, status) {
@@ -436,6 +450,7 @@ function mapEmployee(row) {
     manager: row.manager,
     status: row.status,
     profileComplete: row.profile_complete,
+    templateId: row.template_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

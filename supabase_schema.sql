@@ -36,9 +36,20 @@ CREATE TABLE IF NOT EXISTS employees (
   manager         TEXT,
   status          TEXT DEFAULT 'active',
   profile_complete BOOLEAN DEFAULT FALSE,
+  template_id     UUID REFERENCES assessment_templates(id) ON DELETE SET NULL,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add template_id to existing employees table if it doesn't exist (migration)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='employees' AND column_name='template_id'
+  ) THEN
+    ALTER TABLE employees ADD COLUMN template_id UUID REFERENCES assessment_templates(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- ── Template Sections ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS template_sections (
