@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Star, Eye, EyeOff, AlertCircle, Mail, KeyRound, CheckCircle, ArrowLeft, Copy, Shield } from 'lucide-react';
+import { Eye, EyeOff, AlertCircle, Mail, KeyRound, CheckCircle, ArrowLeft, Copy, Shield } from 'lucide-react';
 import { authenticate, requestPasswordReset, changePassword } from '../lib/supabase';
 import { useApp } from '../store/AppContext';
 import { Button, Input, Alert, Divider } from '../components/UI';
@@ -202,10 +202,8 @@ export default function LoginPage({ onRegister }) {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
           <div className="text-center mb-6">
-            <div className="w-14 h-14 bg-gradient-to-br from-indigo-400 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
-              <Star size={24} className="text-white" />
-            </div>
-            <h1 className="text-xl font-bold text-white">360° Assessment Tool</h1>
+            <img src="/optem-logo.png" alt="Optem Consulting" className="h-20 mx-auto mb-3 drop-shadow-lg" />
+            <p className="text-indigo-300 text-sm">Power Skills Performance Platform</p>
           </div>
           <div className="bg-white rounded-2xl shadow-2xl p-8">
             <ChangePasswordBanner userId={loggedInUser.id} onDone={() => login(loggedInUser)} />
@@ -221,10 +219,8 @@ export default function LoginPage({ onRegister }) {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
           <div className="text-center mb-6">
-            <div className="w-14 h-14 bg-gradient-to-br from-indigo-400 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
-              <Star size={24} className="text-white" />
-            </div>
-            <h1 className="text-xl font-bold text-white">360° Assessment Tool</h1>
+            <img src="/optem-logo.png" alt="Optem Consulting" className="h-20 mx-auto mb-3 drop-shadow-lg" />
+            <p className="text-indigo-300 text-sm">Power Skills Performance Platform</p>
           </div>
           <ForgotPassword onBack={() => setMode('login')} />
         </div>
@@ -238,9 +234,7 @@ export default function LoginPage({ onRegister }) {
       <div className="w-full max-w-md">
         {/* Brand */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-indigo-400 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <Star size={30} className="text-white" />
-          </div>
+          <img src="/optem-logo.png" alt="Optem Consulting" className="h-24 mx-auto mb-4 drop-shadow-xl" />
           <h1 className="text-2xl font-bold text-white">360° Assessment Tool</h1>
           <p className="text-indigo-300 text-sm mt-1">Power Skills Performance Platform</p>
         </div>

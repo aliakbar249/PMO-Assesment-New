@@ -42,16 +42,8 @@ export default function Layout({ page, onNavigate, children }) {
   const SideContent = () => (
     <>
       {/* Brand */}
-      <div className="px-5 py-5 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center flex-shrink-0">
-            <Star size={17} className="text-white" />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-gray-800 leading-tight">360° Assessment</div>
-            <div className="text-xs text-gray-500">Power Skills Tool</div>
-          </div>
-        </div>
+      <div className="px-5 py-4 border-b border-gray-100">
+        <img src="/optem-logo-2.png" alt="Optem Consulting" className="h-14 mx-auto object-contain" />
       </div>
 
       {/* User card */}
