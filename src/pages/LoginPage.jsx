@@ -28,7 +28,7 @@ function ForgotPassword({ onBack }) {
 
   return (
     <div>
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-indigo-300 hover:text-white mb-6 transition-colors">
+      <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium mb-6 transition-colors hover:opacity-70" style={{color: '#1e2d4a'}}>
         <ArrowLeft size={15} /> Back to Sign In
       </button>
 
@@ -199,11 +199,11 @@ export default function LoginPage({ onRegister }) {
   // ── Change password flow after temp login ─────────────────
   if (loggedInUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
+      <div className="min-h-screen flex items-center justify-center p-4" style={{background: 'linear-gradient(135deg, #f8f6f0 0%, #eee8d8 40%, #e8e0cc 100%)'}}>
         <div className="w-full max-w-md">
           <div className="text-center mb-6">
-            <img src="/optem-logo.png" alt="Optem Consulting" className="h-20 mx-auto mb-3 drop-shadow-lg" />
-            <p className="text-indigo-300 text-sm">Power Skills Performance Platform</p>
+            <img src="/optem-logo.png" alt="Optem Consulting" className="h-24 mx-auto mb-3" />
+            <p className="text-sm font-medium" style={{color: '#8a7340'}}>Power Skills Performance Platform</p>
           </div>
           <div className="bg-white rounded-2xl shadow-2xl p-8">
             <ChangePasswordBanner userId={loggedInUser.id} onDone={() => login(loggedInUser)} />
@@ -216,11 +216,11 @@ export default function LoginPage({ onRegister }) {
   // ── Forgot password mode ──────────────────────────────────
   if (mode === 'forgot') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
+      <div className="min-h-screen flex items-center justify-center p-4" style={{background: 'linear-gradient(135deg, #f8f6f0 0%, #eee8d8 40%, #e8e0cc 100%)'}}>
         <div className="w-full max-w-md">
           <div className="text-center mb-6">
-            <img src="/optem-logo.png" alt="Optem Consulting" className="h-20 mx-auto mb-3 drop-shadow-lg" />
-            <p className="text-indigo-300 text-sm">Power Skills Performance Platform</p>
+            <img src="/optem-logo.png" alt="Optem Consulting" className="h-24 mx-auto mb-3" />
+            <p className="text-sm font-medium" style={{color: '#8a7340'}}>Power Skills Performance Platform</p>
           </div>
           <ForgotPassword onBack={() => setMode('login')} />
         </div>
@@ -230,13 +230,13 @@ export default function LoginPage({ onRegister }) {
 
   // ── Normal login ──────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4" style={{background: 'linear-gradient(135deg, #f8f6f0 0%, #eee8d8 40%, #e8e0cc 100%)'}}>
       <div className="w-full max-w-md">
         {/* Brand */}
         <div className="text-center mb-8">
-          <img src="/optem-logo.png" alt="Optem Consulting" className="h-24 mx-auto mb-4 drop-shadow-xl" />
-          <h1 className="text-2xl font-bold text-white">360° Assessment Tool</h1>
-          <p className="text-indigo-300 text-sm mt-1">Power Skills Performance Platform</p>
+          <img src="/optem-logo.png" alt="Optem Consulting" className="h-28 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold" style={{color: '#1e2d4a'}}>360° Assessment Tool</h1>
+          <p className="text-sm mt-1 font-medium" style={{color: '#8a7340'}}>Power Skills Performance Platform</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl p-8">
