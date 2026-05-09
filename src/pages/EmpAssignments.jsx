@@ -98,6 +98,7 @@ export default function EmpAssignments({ onNavigate }) {
   const [modal, setModal] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const empRef = useRef(null);
 
   useEffect(() => {
@@ -127,12 +128,18 @@ export default function EmpAssignments({ onNavigate }) {
 
   const handleSave = async (data) => {
     setSaving(true);
-    const slot = data.id
-      ? (assignments.find(a => a.id === data.id)?.slotNumber || assignments.length + 1)
-      : assignments.length + 1;
-    await upsertAssignment(employee.id, { ...data, slotNumber: slot });
-    await reload();
+    setSaveError('');
+    // For edits, preserve the existing slot number; for new records upsertAssignment picks the free slot
+    const slotNumber = data.id
+      ? (assignments.find(a => a.id === data.id)?.slotNumber || 1)
+      : null; // upsertAssignment will find the first free slot (1/2/3)
+    const result = await upsertAssignment(employee.id, { ...data, slotNumber });
     setSaving(false);
+    if (result && !result.success) {
+      setSaveError(result.error || 'Failed to save assignment. Please try again.');
+      return; // keep modal open so user sees the error
+    }
+    await reload();
     setModal(null);
   };
 
@@ -223,12 +230,22 @@ export default function EmpAssignments({ onNavigate }) {
       )}
 
       {/* Add/Edit Modal */}
-      <Modal open={!!modal} onClose={() => setModal(null)}
+      <Modal open={!!modal} onClose={() => { setModal(null); setSaveError(''); }}
         title={modal === 'add' ? 'Add New Assignment' : 'Edit Assignment'} size="xl">
+        {saveError && (
+          <Alert type="error" className="mb-4">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">Save failed:</span> {saveError}
+            </div>
+          </Alert>
+        )}
+        {saving && (
+          <Alert type="info" className="mb-4">Saving assignment…</Alert>
+        )}
         <AssignmentForm
           initial={editing || EMPTY_FORM}
           onSave={handleSave}
-          onCancel={() => setModal(null)}
+          onCancel={() => { setModal(null); setSaveError(''); }}
         />
       </Modal>
 

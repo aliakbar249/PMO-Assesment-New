@@ -843,6 +843,9 @@ export async function getAssignmentsByEmployee(employeeId) {
 }
 
 export async function upsertAssignment(employeeId, assignment) {
+  // Convert YYYY-MM (month picker) → YYYY-MM-01 so Postgres DATE column accepts it
+  const toDate = v => (v && /^\d{4}-\d{2}$/.test(v) ? `${v}-01` : v || null);
+
   const row = {
     employee_id: employeeId,
     slot_number: assignment.slotNumber || 1,
@@ -851,8 +854,8 @@ export async function upsertAssignment(employeeId, assignment) {
     sector: assignment.sector || null,
     client_org: assignment.clientOrg || null,
     role: assignment.role || null,
-    start_date: assignment.startDate || null,
-    end_date: assignment.endDate || null,
+    start_date: toDate(assignment.startDate),
+    end_date: toDate(assignment.endDate),
     status: assignment.status || null,
     budget: assignment.budget || null,
     team_size: assignment.teamSize ? parseInt(assignment.teamSize) : null,
@@ -864,19 +867,33 @@ export async function upsertAssignment(employeeId, assignment) {
   };
 
   if (assignment.id) {
-    // Check if it's a real UUID (Supabase row)
+    // Update existing row
     const { data: existing } = await supabase
       .from('assignments')
       .select('id')
       .eq('id', assignment.id)
       .maybeSingle();
     if (existing) {
-      await supabase.from('assignments').update(row).eq('id', assignment.id);
-      return;
+      const { error } = await supabase.from('assignments').update(row).eq('id', assignment.id);
+      if (error) { console.error('upsertAssignment update error:', error); return { success: false, error: error.message }; }
+      return { success: true };
     }
   }
-  // Insert new
-  await supabase.from('assignments').insert({ id: genId(), ...row });
+
+  // Insert new — pick the lowest unused slot number (1, 2 or 3)
+  const { data: existingSlots } = await supabase
+    .from('assignments')
+    .select('slot_number')
+    .eq('employee_id', employeeId);
+  const usedSlots = (existingSlots || []).map(r => r.slot_number);
+  const freeSlot  = [1, 2, 3].find(n => !usedSlots.includes(n));
+  if (!freeSlot) return { success: false, error: 'Maximum of 3 assignments already reached.' };
+
+  const { error } = await supabase
+    .from('assignments')
+    .insert({ id: genId(), ...row, slot_number: freeSlot });
+  if (error) { console.error('upsertAssignment insert error:', error); return { success: false, error: error.message }; }
+  return { success: true };
 }
 
 export async function deleteAssignment(assignmentId) {
@@ -884,6 +901,8 @@ export async function deleteAssignment(assignmentId) {
 }
 
 function mapAssignment(row) {
+  // Postgres DATE returns "YYYY-MM-DD"; strip the day so the month picker shows "YYYY-MM"
+  const toMonth = v => (v && v.length === 10 ? v.slice(0, 7) : v || '');
   return {
     id: row.id,
     employeeId: row.employee_id,
@@ -893,8 +912,8 @@ function mapAssignment(row) {
     sector: row.sector,
     clientOrg: row.client_org,
     role: row.role,
-    startDate: row.start_date,
-    endDate: row.end_date,
+    startDate: toMonth(row.start_date),
+    endDate: toMonth(row.end_date),
     status: row.status,
     budget: row.budget,
     teamSize: row.team_size,
