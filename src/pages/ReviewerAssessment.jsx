@@ -23,11 +23,15 @@ const ASSIGNMENT_QUESTIONS = [
   { id: 'q8', text: 'Demonstrated accountability for results and decisions' },
 ];
 
-// ─── Helper: convert self-wording to third-person ─────────────
-function toThirdPerson(text, pronoun = 'He/She') {
+// ─── Helper: prefix statement with employee first name ────────
+// Statements are written in 3rd-person base form (no subject).
+// We prepend the first name so they read: "John engages team members..."
+function withFirstName(text, firstName) {
   if (!text) return text;
-  // Capitalise first letter
-  return text.charAt(0).toUpperCase() + text.slice(1);
+  const name = firstName || 'This person';
+  // Lower-case first letter of original text then prepend name
+  const body = text.charAt(0).toLowerCase() + text.slice(1);
+  return `${name} ${body}`;
 }
 
 export default function ReviewerAssessment({ onNavigate }) {
@@ -40,6 +44,7 @@ export default function ReviewerAssessment({ onNavigate }) {
   const [localAssignRatings, setLocalAssignRatings] = useState({});
   const [activeStep,  setActiveStep]  = useState(0);
   const [saved,       setSaved]       = useState(false);
+  const [saveError,   setSaveError]   = useState('');
   const [saving,      setSaving]      = useState(false);
   const [submitModal, setSubmitModal] = useState(false);
   const [submitted,   setSubmitted]   = useState(false);
@@ -108,12 +113,18 @@ export default function ReviewerAssessment({ onNavigate }) {
     const emp = empRef.current;
     if (!rev?.id || !emp) return;
     setSaving(true);
+    setSaveError('');
+    let result;
     if (step?.type === 'section') {
-      await saveReviewProgress(rev.id, emp.id, step.id, localSections[step.id] || {});
+      result = await saveReviewProgress(rev.id, emp.id, step.id, localSections[step.id] || {});
     } else {
-      await saveAssignmentReview(rev.id, emp.id, localAssignRatings);
+      result = await saveAssignmentReview(rev.id, emp.id, localAssignRatings);
     }
     setSaving(false);
+    if (result && !result.success) {
+      setSaveError(result.error || 'Failed to save. Please try again.');
+      return;
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -131,10 +142,23 @@ export default function ReviewerAssessment({ onNavigate }) {
     const emp = empRef.current;
     if (!rev?.id || !emp) return;
     setSaving(true);
+    setSaveError('');
     for (const sec of sections) {
-      await saveReviewProgress(rev.id, emp.id, sec.id, localSections[sec.id] || {});
+      const r = await saveReviewProgress(rev.id, emp.id, sec.id, localSections[sec.id] || {});
+      if (r && !r.success) {
+        setSaveError(r.error || 'Failed to save. Please try again.');
+        setSaving(false);
+        setSubmitModal(false);
+        return;
+      }
     }
-    await saveAssignmentReview(rev.id, emp.id, localAssignRatings);
+    const r2 = await saveAssignmentReview(rev.id, emp.id, localAssignRatings);
+    if (r2 && !r2.success) {
+      setSaveError(r2.error || 'Failed to save assignment ratings.');
+      setSaving(false);
+      setSubmitModal(false);
+      return;
+    }
     await submitReview(rev.id, emp.id);
     refresh();
     setSaving(false);
@@ -211,7 +235,7 @@ export default function ReviewerAssessment({ onNavigate }) {
       {step?.type === 'section' && (
         <SectionPanel
           section={step}
-          employeeName={employee.name}
+          employeeFirstName={employee.name?.split(' ')[0] || 'This person'}
           ratings={localSections[step.id] || {}}
           onRate={(stmtId, val) => handleRateSection(step.id, stmtId, val)}
           stepNum={activeStep + 1}
@@ -223,6 +247,7 @@ export default function ReviewerAssessment({ onNavigate }) {
         <AssignmentRatingsPanel
           assignments={assignments}
           employeeName={employee.name}
+          employeeFirstName={employee.name?.split(' ')[0] || 'This person'}
           ratings={localAssignRatings}
           onRate={handleRateAssignment}
         />
@@ -244,8 +269,9 @@ export default function ReviewerAssessment({ onNavigate }) {
             </Button>
           )}
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap">
           {saved && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle size={12} />Saved</span>}
+          {saveError && <span className="text-xs text-red-600 flex items-center gap-1 max-w-xs">{saveError}</span>}
           <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving}>
             <Save size={14} />{saving ? 'Saving…' : 'Save Progress'}
           </Button>
@@ -275,8 +301,8 @@ export default function ReviewerAssessment({ onNavigate }) {
 }
 
 // ─── Section Panel (third-person wording) ─────────────────────
-function SectionPanel({ section, employeeName, ratings, onRate, stepNum, totalSteps }) {
-  const firstName = employeeName?.split(' ')[0] || 'This person';
+function SectionPanel({ section, employeeFirstName, ratings, onRate, stepNum, totalSteps }) {
+  const firstName = employeeFirstName || 'This person';
 
   return (
     <Card className="mb-4">
@@ -324,9 +350,9 @@ function SectionPanel({ section, employeeName, ratings, onRate, stepNum, totalSt
               <div className="flex items-start gap-3 mb-3">
                 <span className="text-xs font-bold text-gray-400 w-6 flex-shrink-0 mt-0.5">{idx + 1}.</span>
                 <div className="flex-1">
-                  {/* Third-person wording */}
+                  {/* Prefixed with employee first name */}
                   <p className="text-sm text-gray-800 font-medium leading-snug">
-                    {toThirdPerson(stmt.text)}
+                    {withFirstName(stmt.text, firstName)}
                   </p>
                   {stmt.reviewerTip && (
                     <p className="text-xs text-blue-600 mt-1 italic">{stmt.reviewerTip}</p>
@@ -361,8 +387,8 @@ function SectionPanel({ section, employeeName, ratings, onRate, stepNum, totalSt
 }
 
 // ─── Assignment Ratings Panel ──────────────────────────────────
-function AssignmentRatingsPanel({ assignments, employeeName, ratings, onRate }) {
-  const firstName = employeeName?.split(' ')[0] || 'this person';
+function AssignmentRatingsPanel({ assignments, employeeName, employeeFirstName, ratings, onRate }) {
+  const firstName = employeeFirstName || 'this person';
 
   if (!assignments || assignments.length === 0) {
     return (
@@ -433,7 +459,7 @@ function AssignmentRatingsPanel({ assignments, employeeName, ratings, onRate }) 
                   <div className="flex items-start gap-2 mb-2">
                     <span className="text-xs font-bold text-gray-400 w-5 flex-shrink-0">{idx + 1}.</span>
                     <div className="flex-1">
-                      <p className="text-xs text-gray-700 font-medium">{q.text}</p>
+                      <p className="text-xs text-gray-700 font-medium">{withFirstName(q.text, firstName)}</p>
                     </div>
                     {rObj && (
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${rObj.bg} ${rObj.textColor} border ${rObj.border}`}>

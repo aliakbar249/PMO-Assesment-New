@@ -1239,12 +1239,13 @@ export async function saveReviewProgress(reviewerId, employeeId, sectionId, rati
   const existing = await getReview(reviewerId, employeeId);
   const sections = { ...(existing?.sections || {}), [sectionId]: ratings };
   if (existing) {
-    await supabase
+    const { error } = await supabase
       .from('reviews')
       .update({ responses: sections, updated_at: nowIso() })
       .eq('id', existing.id);
+    if (error) { console.error('saveReviewProgress update error:', error); return { success: false, error: error.message }; }
   } else {
-    await supabase.from('reviews').insert({
+    const { error } = await supabase.from('reviews').insert({
       id: genId(),
       reviewer_id: reviewerId,
       employee_id: employeeId,
@@ -1252,18 +1253,21 @@ export async function saveReviewProgress(reviewerId, employeeId, sectionId, rati
       assignment_ratings: {},
       status: 'in_progress',
     });
+    if (error) { console.error('saveReviewProgress insert error:', error); return { success: false, error: error.message }; }
   }
+  return { success: true };
 }
 
 export async function saveAssignmentReview(reviewerId, employeeId, assignmentRatings) {
   const existing = await getReview(reviewerId, employeeId);
   if (existing) {
-    await supabase
+    const { error } = await supabase
       .from('reviews')
       .update({ assignment_ratings: assignmentRatings, updated_at: nowIso() })
       .eq('id', existing.id);
+    if (error) { console.error('saveAssignmentReview update error:', error); return { success: false, error: error.message }; }
   } else {
-    await supabase.from('reviews').insert({
+    const { error } = await supabase.from('reviews').insert({
       id: genId(),
       reviewer_id: reviewerId,
       employee_id: employeeId,
@@ -1271,7 +1275,9 @@ export async function saveAssignmentReview(reviewerId, employeeId, assignmentRat
       assignment_ratings: assignmentRatings,
       status: 'in_progress',
     });
+    if (error) { console.error('saveAssignmentReview insert error:', error); return { success: false, error: error.message }; }
   }
+  return { success: true };
 }
 
 export async function submitReview(reviewerId, employeeId) {
