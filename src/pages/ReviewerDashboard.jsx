@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { getReviewerByUserId, getReviewsForEmployee, getEmployeeById, getAssignmentsByEmployee } from '../lib/supabase';
+import { getReviewerByUserId, getReviewsForEmployee, getEmployeeById, getAssignmentsByEmployee, getTemplateForEmployee } from '../lib/supabase';
 import { StatCard, Card, Badge, Button, ProgressBar, Alert, PageHeader } from '../components/UI';
 import { ClipboardList, CheckCircle, Clock } from 'lucide-react';
 
 export default function ReviewerDashboard({ onNavigate }) {
   const { currentUser, tick } = useApp();
-  const [reviewer,    setReviewer]    = useState(null);
-  const [employee,    setEmployee]    = useState(null);
-  const [myReview,    setMyReview]    = useState(null);
-  const [assignments, setAssignments] = useState([]);
-  const [loading,     setLoading]     = useState(true);
+  const [reviewer,       setReviewer]       = useState(null);
+  const [employee,       setEmployee]       = useState(null);
+  const [myReview,       setMyReview]       = useState(null);
+  const [assignments,    setAssignments]    = useState([]);
+  const [templateSections, setTemplateSections] = useState([]);
+  const [loading,        setLoading]        = useState(true);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -18,13 +19,15 @@ export default function ReviewerDashboard({ onNavigate }) {
     getReviewerByUserId(currentUser.id).then(async rev => {
       setReviewer(rev);
       if (rev?.employeeId) {
-        const [emp, reviews, asgns] = await Promise.all([
+        const [emp, reviews, asgns, tmplSections] = await Promise.all([
           getEmployeeById(rev.employeeId),
           getReviewsForEmployee(rev.employeeId),
           getAssignmentsByEmployee(rev.employeeId),
+          getTemplateForEmployee({ id: rev.employeeId }),
         ]);
         setEmployee(emp);
         setAssignments(asgns || []);
+        setTemplateSections(tmplSections || []);
         const mine = reviews.find(r => r.reviewerId === rev.id);
         setMyReview(mine || null);
       }
@@ -40,8 +43,20 @@ export default function ReviewerDashboard({ onNavigate }) {
 
   const isSubmitted = myReview?.status === 'submitted';
   const inProgress  = myReview?.status === 'in_progress';
-  const totalSections = 4 + 1;
-  const doneSections  = myReview ? Object.keys(myReview.sections || {}).length + (Object.keys(myReview.assignmentRatings || {}).length > 0 ? 1 : 0) : 0;
+
+  // Use actual template section count, not hardcoded 4
+  const numSections   = templateSections.length || 0;
+  // +1 for assignment ratings step only if employee has assignments
+  const totalSections = numSections + (assignments.length > 0 ? 1 : 0);
+
+  // Count only competency sections that were actually saved (cap at numSections)
+  const savedSectionCount = Math.min(
+    Object.keys(myReview?.sections || {}).length,
+    numSections
+  );
+  // Assignment ratings count as 1 if any rating was saved
+  const assignmentDone = Object.keys(myReview?.assignmentRatings || {}).length > 0 ? 1 : 0;
+  const doneSections   = savedSectionCount + (assignments.length > 0 ? assignmentDone : 0);
 
   return (
     <div>
