@@ -1149,12 +1149,14 @@ export async function getReviewerByUserId(userId) {
     .eq('user_id', userId)
     .maybeSingle();
   if (!rev) return null;
+  // IMPORTANT: spread mapNomination FIRST, then override id/userId/nominationId/employeeId
+  // so that nomination.id never overwrites the reviewers.id used for FK on reviews table
   return {
-    id: rev.id,
+    ...(rev.nominations ? mapNomination(rev.nominations) : {}),
+    id: rev.id,                        // reviewers.id  — used as reviews.reviewer_id FK
     userId: rev.user_id,
     nominationId: rev.nomination_id,
-    employeeId: rev.employee_id,
-    ...(rev.nominations ? mapNomination(rev.nominations) : {}),
+    employeeId: rev.employee_id,       // reviewers.employee_id (authoritative)
   };
 }
 
