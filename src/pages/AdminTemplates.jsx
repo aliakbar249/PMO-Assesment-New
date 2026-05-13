@@ -105,6 +105,29 @@ function AssessmentTemplateCard({ template, allSections, onEdit, onDelete }) {
               <span className="text-xs text-amber-600">⚠ No targeting rules set</span>
             )}
           </div>
+          {/* Reviewer types summary */}
+          {template.reviewerTypes && (
+            <div className="flex gap-1.5 mt-2 flex-wrap">
+              {template.reviewerTypes.self && (
+                <span className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg font-medium">Self</span>
+              )}
+              {template.reviewerTypes.sponsor && (
+                <span className="text-xs px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg font-medium">
+                  Sponsors ×{template.reviewerCounts?.sponsor ?? 1}
+                </span>
+              )}
+              {template.reviewerTypes.peer && (
+                <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium">
+                  Peers ×{template.reviewerCounts?.peer ?? 1}
+                </span>
+              )}
+              {template.reviewerTypes.team && (
+                <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-medium">
+                  Team Members ×{template.reviewerCounts?.team ?? 1}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex gap-2 flex-shrink-0">
           <Button size="xs" variant="ghost" onClick={() => setExpanded(e => !e)}>
@@ -142,6 +165,13 @@ function AssessmentTemplateCard({ template, allSections, onEdit, onDelete }) {
 }
 
 // ─── Assessment Template Form Modal ───────────────────────────
+const REVIEWER_TYPE_DEFS = [
+  { key: 'self',    label: 'Self',         hasCounts: false, color: 'indigo' },
+  { key: 'sponsor', label: 'Sponsors',     hasCounts: true,  color: 'purple' },
+  { key: 'peer',    label: 'Peers',        hasCounts: true,  color: 'blue'   },
+  { key: 'team',    label: 'Team Members', hasCounts: true,  color: 'amber'  },
+];
+
 function TemplateFormModal({ template, allSections, onSave, onClose, saving, saveError }) {
   const [form, setForm] = useState({
     id: template?.id || null,
@@ -151,7 +181,25 @@ function TemplateFormModal({ template, allSections, onSave, onClose, saving, sav
     targetLevels: template?.targetLevels || [],
     targetDepartments: template?.targetDepartments || [],
     sectionIds: template?.sectionIds || allSections.map(s => s.id),
+    reviewerTypes:  template?.reviewerTypes  || { self: true, sponsor: false, peer: false, team: false },
+    reviewerCounts: template?.reviewerCounts || { sponsor: 1, peer: 1, team: 1 },
   });
+
+  const toggleReviewerType = (key) => {
+    if (key === 'self') return; // self is always enabled
+    setForm(f => ({
+      ...f,
+      reviewerTypes: { ...f.reviewerTypes, [key]: !f.reviewerTypes[key] },
+    }));
+  };
+
+  const setReviewerCount = (key, val) => {
+    const num = Math.max(1, parseInt(val) || 1);
+    setForm(f => ({
+      ...f,
+      reviewerCounts: { ...f.reviewerCounts, [key]: num },
+    }));
+  };
 
   const toggleLevel = (lvl) => {
     setForm(f => ({
@@ -262,6 +310,68 @@ function TemplateFormModal({ template, allSections, onSave, onClose, saving, sav
               {dept}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Reviewer Types */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Reviewer Types <span className="text-xs text-gray-400 font-normal">(select which reviewer types apply)</span>
+        </label>
+        <div className="space-y-2">
+          {REVIEWER_TYPE_DEFS.map(({ key, label, hasCounts, color }) => {
+            const active = key === 'self' ? true : !!form.reviewerTypes[key];
+            const colorMap = {
+              indigo: { on: 'bg-indigo-50 border-indigo-300', check: 'text-indigo-600', label: 'text-indigo-700' },
+              purple: { on: 'bg-purple-50 border-purple-300', check: 'text-purple-600', label: 'text-purple-700' },
+              blue:   { on: 'bg-blue-50 border-blue-300',     check: 'text-blue-600',   label: 'text-blue-700'   },
+              amber:  { on: 'bg-amber-50 border-amber-300',   check: 'text-amber-600',  label: 'text-amber-700'  },
+            };
+            const c = colorMap[color];
+            return (
+              <div
+                key={key}
+                className={`flex items-center gap-3 p-3 border-2 rounded-xl transition-colors
+                  ${active ? c.on : 'bg-white border-gray-200'}`}
+              >
+                <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    disabled={key === 'self'}
+                    onChange={() => toggleReviewerType(key)}
+                    className={`rounded border-gray-300 focus:ring-2 ${c.check}`}
+                  />
+                  <span className={`text-sm font-medium ${active ? c.label : 'text-gray-500'}`}>
+                    {label}
+                    {key === 'self' && (
+                      <span className="ml-2 text-xs font-normal text-gray-400">(always included)</span>
+                    )}
+                  </span>
+                </label>
+                {hasCounts && active && (
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-xs text-gray-500">Required count:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={form.reviewerCounts[key] ?? 1}
+                      onChange={e => setReviewerCount(key, e.target.value)}
+                      className={`w-16 text-center px-2 py-1 rounded-lg border text-sm font-bold focus:outline-none focus:ring-2
+                        ${color === 'purple' ? 'border-purple-300 text-purple-700 focus:ring-purple-100'
+                        : color === 'blue'   ? 'border-blue-300 text-blue-700 focus:ring-blue-100'
+                        : color === 'amber'  ? 'border-amber-300 text-amber-700 focus:ring-amber-100'
+                        : 'border-indigo-300 text-indigo-700 focus:ring-indigo-100'}`}
+                    />
+                  </div>
+                )}
+                {hasCounts && !active && (
+                  <span className="text-xs text-gray-300 flex-shrink-0">Not required</span>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -384,20 +494,36 @@ export default function AdminTemplates() {
   const handleSaveAssessmentTemplate = async (form) => {
     setSavingTemplates(true);
     setTemplateSaveError('');
+
+    // ── Step 1: always flush current sections to template_sections first ──
+    // This ensures every section UUID referenced in form.sectionIds already
+    // exists in the DB before assessment_template_sections inserts its FK rows.
+    try {
+      await saveTemplates(sections);
+    } catch (e) {
+      setSavingTemplates(false);
+      setTemplateSaveError('Failed to save sections before creating template. Please click "Save All Changes" on the Sections tab first, then try again.');
+      return;
+    }
+
+    // ── Step 2: save the assessment template + section links ──
     const result = await saveAssessmentTemplates([form]);
     if (result && !result.success) {
       setSavingTemplates(false);
       setTemplateSaveError(result.error || 'Failed to save template. Check console for details.');
-      return; // keep modal open so admin can see the error
+      return;
     }
-    // Reload the list fresh from DB
-    const atpls = await getAssessmentTemplates();
+
+    // ── Step 3: reload fresh data from DB ──
+    const [freshSections, atpls] = await Promise.all([getTemplates(), getAssessmentTemplates()]);
+    setSections(freshSections || []);
     setAssessmentTemplates(atpls || []);
     setSavingTemplates(false);
     setTemplateModal(null);
     setTemplateSaveError('');
+    setSaved(true); // sections were saved too
     setTemplateSaved(true);
-    setTimeout(() => setTemplateSaved(false), 3000);
+    setTimeout(() => { setSaved(false); setTemplateSaved(false); }, 3000);
     refresh();
   };
 

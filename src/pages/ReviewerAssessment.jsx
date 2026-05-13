@@ -7,7 +7,7 @@ import {
 } from '../lib/supabase';
 import { RATING_SCALE, NOT_OBSERVED } from '../data/competencies';
 import { Button, Card, Alert, Badge, ProgressBar, TipBox, PageHeader, Modal } from '../components/UI';
-import { CheckCircle, Save, Send, ChevronLeft, ChevronRight, Briefcase, Info } from 'lucide-react';
+import { CheckCircle, Save, Send, ChevronLeft, ChevronRight, Briefcase, Info, AlertCircle } from 'lucide-react';
 
 const ALL_RATINGS = [...RATING_SCALE, NOT_OBSERVED];
 
@@ -43,11 +43,12 @@ export default function ReviewerAssessment({ onNavigate }) {
   const [localSections, setLocalSections] = useState({});
   const [localAssignRatings, setLocalAssignRatings] = useState({});
   const [activeStep,  setActiveStep]  = useState(0);
-  const [saved,       setSaved]       = useState(false);
-  const [saveError,   setSaveError]   = useState('');
-  const [saving,      setSaving]      = useState(false);
-  const [submitModal, setSubmitModal] = useState(false);
-  const [submitted,   setSubmitted]   = useState(false);
+  const [saved,         setSaved]         = useState(false);
+  const [saveError,     setSaveError]     = useState('');
+  const [saving,        setSaving]        = useState(false);
+  const [submitModal,   setSubmitModal]   = useState(false);
+  const [submitWarning, setSubmitWarning] = useState([]); // list of incomplete section names
+  const [submitted,     setSubmitted]     = useState(false);
   const [loading,     setLoading]     = useState(true);
   const revRef  = useRef(null);
   const empRef  = useRef(null);
@@ -166,6 +167,19 @@ export default function ReviewerAssessment({ onNavigate }) {
     setSubmitModal(false);
   };
 
+  // ── Submit click: validate completeness first ─────────────────
+  const handleSubmitClick = () => {
+    const incomplete = sections
+      .filter(s => !sectionDone(s.id))
+      .map(s => s.title);
+    if (incomplete.length > 0) {
+      setSubmitWarning(incomplete);
+      return;
+    }
+    setSubmitWarning([]);
+    setSubmitModal(true);
+  };
+
   const totalStatements = sections.reduce((s, sec) => s + sec.statements.length, 0);
   const totalRated = sections.reduce((s, sec) => s + Object.keys(localSections[sec.id] || {}).length, 0);
 
@@ -275,11 +289,14 @@ export default function ReviewerAssessment({ onNavigate }) {
           <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving}>
             <Save size={14} />{saving ? 'Saving…' : 'Save Progress'}
           </Button>
-          {allSectionsDone && (
-            <Button variant="success" size="sm" onClick={() => setSubmitModal(true)}>
-              <Send size={14} />Submit Assessment
-            </Button>
-          )}
+          <Button
+            variant={allSectionsDone ? 'success' : 'secondary'}
+            size="sm"
+            onClick={handleSubmitClick}
+            disabled={saving}
+          >
+            <Send size={14} />Submit Assessment
+          </Button>
         </div>
       </div>
 
@@ -294,6 +311,33 @@ export default function ReviewerAssessment({ onNavigate }) {
           <Button variant="success" onClick={handleSubmit} disabled={saving}>
             <Send size={14} />{saving ? 'Submitting…' : 'Submit Now'}
           </Button>
+        </div>
+      </Modal>
+
+      {/* Incomplete sections warning modal */}
+      <Modal
+        open={submitWarning.length > 0}
+        onClose={() => setSubmitWarning([])}
+        title="Incomplete Sections"
+      >
+        <div className="mb-4">
+          <p className="text-sm text-gray-600 mb-3">
+            Please complete all section responses before submitting. The following sections still have unrated statements:
+          </p>
+          <ul className="space-y-2">
+            {submitWarning.map((name, i) => (
+              <li key={i} className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                <AlertCircle size={14} className="flex-shrink-0" />
+                <span className="font-medium">{name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          Click on any section above in the progress bar to go back and complete it.
+        </p>
+        <div className="flex justify-end">
+          <Button variant="secondary" onClick={() => setSubmitWarning([])}>Go Back &amp; Complete</Button>
         </div>
       </Modal>
     </div>

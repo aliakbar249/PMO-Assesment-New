@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   getEmployeeByUserId, getAssessment, getAssignmentsByEmployee,
-  getNominations, getTemplateForEmployee
+  getNominations, getTemplateForEmployee, getAssessmentResults
 } from '../lib/supabase';
 import { StatCard, Card, ProgressBar, Badge, Button, Alert } from '../components/UI';
-import { Star, Briefcase, Users, ClipboardList, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Star, Briefcase, Users, ClipboardList, CheckCircle, Clock, AlertCircle, BarChart2 } from 'lucide-react';
 
 export default function EmpDashboard({ onNavigate }) {
   const { currentUser, tick } = useApp();
@@ -14,6 +14,7 @@ export default function EmpDashboard({ onNavigate }) {
   const [assignments, setAssignments] = useState([]);
   const [nominations, setNominations] = useState(null);
   const [templates,   setTemplates]   = useState([]);
+  const [selfResults, setSelfResults] = useState(null); // section-wise self-avg after submission
   const [loading,     setLoading]     = useState(true);
 
   useEffect(() => {
@@ -32,6 +33,11 @@ export default function EmpDashboard({ onNavigate }) {
         setAssignments(asgns || []);
         setNominations(noms);
         setTemplates(tpls || []);
+        // Load self-average results if self-assessment is submitted
+        if (a?.status === 'submitted') {
+          const res = await getAssessmentResults(emp.id);
+          setSelfResults(res);
+        }
       }
       setLoading(false);
     });
@@ -120,6 +126,54 @@ export default function EmpDashboard({ onNavigate }) {
           </Card>
         ))}
       </div>
+
+      {/* Self-Assessment Results (shown only after submission) */}
+      {selfResults && selfResults.sections && selfResults.sections.length > 0 && (
+        <Card className="p-5 mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart2 size={16} className="text-indigo-500" />
+            <h3 className="text-sm font-semibold text-gray-700">My Self-Assessment Results</h3>
+            <Badge variant="success" size="xs">Submitted</Badge>
+          </div>
+
+          {/* Overall self-avg */}
+          {(() => {
+            const vals = selfResults.sections.map(s => s.selfAvg).filter(v => v !== null);
+            const overall = vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : null;
+            return overall ? (
+              <div className="mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100 flex items-center justify-between">
+                <span className="text-sm font-semibold text-indigo-700">Overall Self-Average</span>
+                <span className="text-2xl font-bold text-indigo-600">{overall}</span>
+              </div>
+            ) : null;
+          })()}
+
+          {/* Per-section self-avg */}
+          <div className="space-y-2">
+            {selfResults.sections.map(sec => (
+              <div key={sec.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                <span className="text-xs font-medium text-gray-700">{sec.title}</span>
+                <div className="flex items-center gap-3">
+                  {sec.selfAvg !== null ? (
+                    <>
+                      <div className="w-24 h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-500 rounded-full"
+                          style={{ width: `${(sec.selfAvg / 5) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-bold text-indigo-600 w-10 text-right">{sec.selfAvg.toFixed(2)}</span>
+                    </>
+                  ) : (
+                    <span className="text-xs text-gray-400">No ratings</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 mt-3">Scale 1–5 · Your self-rating average per section.</p>
+        </Card>
+      )}
 
       {/* Tips */}
       <Card className="p-5">

@@ -158,10 +158,28 @@ CREATE TABLE IF NOT EXISTS assessment_templates (
   is_default          BOOLEAN DEFAULT FALSE,
   target_levels       TEXT[] DEFAULT '{}',
   target_departments  TEXT[] DEFAULT '{}',
+  -- reviewer_types: JSONB e.g. {"self":true,"sponsor":true,"peer":true,"team":false}
+  reviewer_types      JSONB DEFAULT '{"self":true,"sponsor":false,"peer":false,"team":false}',
+  -- reviewer_counts: JSONB e.g. {"sponsor":2,"peer":3,"team":2}
+  reviewer_counts     JSONB DEFAULT '{"sponsor":1,"peer":1,"team":1}',
   active              BOOLEAN DEFAULT TRUE,
   created_at          TIMESTAMPTZ DEFAULT NOW(),
   updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── Migration: add reviewer_types / reviewer_counts if table already exists ──
+-- Run these only if upgrading an existing deployment (idempotent via IF NOT EXISTS)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='assessment_templates' AND column_name='reviewer_types'
+  ) THEN
+    ALTER TABLE assessment_templates
+      ADD COLUMN reviewer_types  JSONB DEFAULT '{"self":true,"sponsor":false,"peer":false,"team":false}',
+      ADD COLUMN reviewer_counts JSONB DEFAULT '{"sponsor":1,"peer":1,"team":1}';
+  END IF;
+END $$;
 
 -- ── Employee Template Assignments (which template is assigned to which employee)
 -- Using a separate table avoids ALTER TABLE on employees (anon key has no DDL rights)

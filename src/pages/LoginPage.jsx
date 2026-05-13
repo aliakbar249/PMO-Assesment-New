@@ -277,11 +277,6 @@ export default function LoginPage({ onRegister }) {
             </Button>
           </form>
 
-          <Divider label="New employee?" />
-          <Button variant="outline" className="w-full" onClick={onRegister}>
-            Create Employee Account
-          </Button>
-
           {/* Demo credentials */}
           <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
             <p className="text-xs font-semibold text-gray-600 mb-2">Demo Account</p>
@@ -291,7 +286,7 @@ export default function LoginPage({ onRegister }) {
               <span className="text-xs text-gray-500 ml-2">admin@company.com</span>
               <span className="text-xs text-gray-400 ml-2">/ Admin@123</span>
             </button>
-            <p className="text-xs text-gray-400 mt-2">Or register a new employee account using the button above.</p>
+            <p className="text-xs text-gray-400 mt-2">Employee accounts are created by the administrator.</p>
           </div>
         </div>
       </div>

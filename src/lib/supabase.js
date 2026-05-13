@@ -710,6 +710,8 @@ export async function getAssessmentTemplates() {
       isDefault: t.is_default,
       targetLevels: t.target_levels || [],
       targetDepartments: t.target_departments || [],
+      reviewerTypes: t.reviewer_types || { self: true, sponsor: false, peer: false, team: false },
+      reviewerCounts: t.reviewer_counts || { sponsor: 1, peer: 1, team: 1 },
       sectionIds,
       sections: sectionIds
         .map(sid => allSections.find(s => s.id === sid))
@@ -732,6 +734,8 @@ export async function saveAssessmentTemplates(templates) {
       is_default: tmpl.isDefault || false,
       target_levels: tmpl.targetLevels || [],
       target_departments: tmpl.targetDepartments || [],
+      reviewer_types: tmpl.reviewerTypes || { self: true, sponsor: false, peer: false, team: false },
+      reviewer_counts: tmpl.reviewerCounts || { sponsor: 1, peer: 1, team: 1 },
       active: true,
       updated_at: nowIso(),
     };
@@ -1330,6 +1334,97 @@ export async function getProgressSummary() {
       completedReviewCount: completedReviews,
     };
   });
+}
+
+// ─── Assessment Results (section-wise averages by reviewer type) ─
+// Returns: { sections: [{id, title, selfAvg, sponsorAvg, peerAvg, teamAvg, overallAvg}] }
+// selfAvg is from assessments.responses; others from reviews.responses grouped by nominations.reviewer_type
+export async function getAssessmentResults(employeeId) {
+  try {
+    // Load template sections for this employee
+    const templateSections = await getTemplateForEmployee({ id: employeeId });
+    if (!templateSections || templateSections.length === 0) return null;
+
+    // Load self-assessment
+    const { data: selfData } = await supabase
+      .from('assessments')
+      .select('responses, status')
+      .eq('employee_id', employeeId)
+      .maybeSingle();
+
+    // Load all submitted reviews for this employee (join reviewer → nomination for type)
+    const { data: reviewRows } = await supabase
+      .from('reviews')
+      .select('reviewer_id, responses, status')
+      .eq('employee_id', employeeId)
+      .eq('status', 'submitted');
+
+    // Load reviewer records to map reviewer_id → nomination_id
+    const { data: reviewerRows } = await supabase
+      .from('reviewers')
+      .select('id, nomination_id')
+      .eq('employee_id', employeeId);
+
+    // Load nominations to map nomination_id → reviewer_type
+    const { data: nomRows } = await supabase
+      .from('nominations')
+      .select('id, reviewer_type')
+      .eq('employee_id', employeeId);
+
+    // Build: reviewerId → reviewerType
+    const revTypeMap = {};
+    for (const rev of (reviewerRows || [])) {
+      const nom = (nomRows || []).find(n => n.id === rev.nomination_id);
+      if (nom) revTypeMap[rev.id] = nom.reviewer_type; // 'peer' | 'sponsor' | 'team'
+    }
+
+    // Helper: compute average score for a section from a responses object
+    // responses = { [sectionId]: { [stmtId]: value } }
+    // Skips value === 0 (Not Observed) when averaging
+    const sectionAvg = (responses, sectionId) => {
+      const ratings = Object.values(responses?.[sectionId] || {}).filter(v => v > 0);
+      if (ratings.length === 0) return null;
+      return +(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(2);
+    };
+
+    // Build per-section results
+    const sections = templateSections.map(sec => {
+      const selfAvg = selfData?.status === 'submitted'
+        ? sectionAvg(selfData.responses || {}, sec.id)
+        : null;
+
+      // Group reviewer responses by type
+      const byType = { sponsor: [], peer: [], team: [] };
+      for (const rv of (reviewRows || [])) {
+        const type = revTypeMap[rv.reviewer_id];
+        const avg = sectionAvg(rv.responses || {}, sec.id);
+        if (avg !== null && type && byType[type] !== undefined) {
+          byType[type].push(avg);
+        }
+      }
+
+      const typeAvg = (arr) => arr.length > 0
+        ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2)
+        : null;
+
+      const sponsorAvg = typeAvg(byType.sponsor);
+      const peerAvg    = typeAvg(byType.peer);
+      const teamAvg    = typeAvg(byType.team);
+
+      // Overall: average of all non-null averages
+      const allAvgs = [selfAvg, sponsorAvg, peerAvg, teamAvg].filter(v => v !== null);
+      const overallAvg = allAvgs.length > 0
+        ? +(allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length).toFixed(2)
+        : null;
+
+      return { id: sec.id, title: sec.title, selfAvg, sponsorAvg, peerAvg, teamAvg, overallAvg };
+    });
+
+    return { sections, selfSubmitted: selfData?.status === 'submitted' };
+  } catch (e) {
+    console.error('getAssessmentResults error:', e);
+    return null;
+  }
 }
 
 // ─── Export ────────────────────────────────────────────────────
