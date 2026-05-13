@@ -275,8 +275,6 @@ export default function LoginPage({ onRegister }) {
               {loading ? 'Signing in…' : 'Sign In'}
             </Button>
           </form>
-
-
         </div>
       </div>
     </div>
