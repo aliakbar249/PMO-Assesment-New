@@ -194,7 +194,6 @@ export default function LoginPage({ onRegister }) {
     login(user);
   };
 
-  const fillDemo = (email, pw) => { setForm({ email, password: pw }); setError(''); };
 
   // ── Change password flow after temp login ─────────────────
   if (loggedInUser) {
@@ -277,17 +276,7 @@ export default function LoginPage({ onRegister }) {
             </Button>
           </form>
 
-          {/* Demo credentials */}
-          <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
-            <p className="text-xs font-semibold text-gray-600 mb-2">Demo Account</p>
-            <button onClick={() => fillDemo('admin@company.com', 'Admin@123')}
-              className="w-full text-left px-3 py-1.5 rounded-lg bg-white border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all">
-              <span className="text-xs font-medium text-indigo-600">Admin</span>
-              <span className="text-xs text-gray-500 ml-2">admin@company.com</span>
-              <span className="text-xs text-gray-400 ml-2">/ Admin@123</span>
-            </button>
-            <p className="text-xs text-gray-400 mt-2">Employee accounts are created by the administrator.</p>
-          </div>
+
         </div>
       </div>
     </div>
