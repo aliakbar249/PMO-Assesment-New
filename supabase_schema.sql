@@ -12,13 +12,34 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT UNIQUE NOT NULL,
   password      TEXT NOT NULL,
   role          TEXT NOT NULL DEFAULT 'employee' 
-                  CHECK (role IN ('admin','employee','reviewer')),
+                  CHECK (role IN ('admin','company_admin','employee','reviewer')),
   name          TEXT,
+  organization  TEXT,          -- used by company_admin to scope their view
   status        TEXT DEFAULT 'active',
   password_reset BOOLEAN DEFAULT FALSE,
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── Migration: add organization column + company_admin role if upgrading ──
+DO $$
+BEGIN
+  -- Add organization column if missing
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='users' AND column_name='organization'
+  ) THEN
+    ALTER TABLE users ADD COLUMN organization TEXT;
+  END IF;
+  -- Widen the role CHECK constraint to include company_admin
+  -- (DROP + RE-ADD the constraint — safe if already done)
+  BEGIN
+    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+    ALTER TABLE users ADD CONSTRAINT users_role_check
+      CHECK (role IN ('admin','company_admin','employee','reviewer'));
+  EXCEPTION WHEN others THEN NULL;
+  END;
+END $$;
 
 -- ── Employees ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS employees (

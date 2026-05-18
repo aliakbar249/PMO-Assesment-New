@@ -4,6 +4,7 @@ import {
   getEmployeeByUserId, getAssessment, saveAssessmentProgress,
   submitSelfAssessment, getTemplateForEmployee
 } from '../lib/supabase';
+import { adaptStatement } from '../lib/statementTense';
 import { RATING_SCALE } from '../data/competencies';
 import { Button, Card, Alert, ProgressBar, Badge, TipBox, PageHeader, Modal } from '../components/UI';
 import { CheckCircle, Save, Send, ChevronRight, ChevronLeft } from 'lucide-react';
@@ -227,10 +228,8 @@ function StatementRow({ index, statement, currentRating, onRate, isSelf }) {
   const rated = currentRating !== undefined;
   const ratingObj = rated ? scale.find(r => r.value === currentRating) : null;
 
-  // Build statement text based on perspective
-  const statementText = isSelf
-    ? `I ${statement.text.charAt(0).toLowerCase() + statement.text.slice(1)}`
-    : statement.text.charAt(0).toUpperCase() + statement.text.slice(1);
+  // Build statement text based on perspective using smart tense adapter
+  const statementText = adaptStatement(statement.text, isSelf ? 'self' : 'reviewer', '');
 
   return (
     <div className={`p-4 rounded-xl border transition-all ${rated ? 'border-indigo-100 bg-indigo-50/40' : 'border-gray-200 bg-white'}`}>

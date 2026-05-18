@@ -6,6 +6,7 @@ import {
   getTemplateForEmployee
 } from '../lib/supabase';
 import { RATING_SCALE, NOT_OBSERVED } from '../data/competencies';
+import { adaptStatement } from '../lib/statementTense';
 import { Button, Card, Alert, Badge, ProgressBar, TipBox, PageHeader, Modal } from '../components/UI';
 import { CheckCircle, Save, Send, ChevronLeft, ChevronRight, Briefcase, Info, AlertCircle } from 'lucide-react';
 
@@ -23,16 +24,7 @@ const ASSIGNMENT_QUESTIONS = [
   { id: 'q8', text: 'Demonstrated accountability for results and decisions' },
 ];
 
-// ─── Helper: prefix statement with employee first name ────────
-// Statements are written in 3rd-person base form (no subject).
-// We prepend the first name so they read: "John engages team members..."
-function withFirstName(text, firstName) {
-  if (!text) return text;
-  const name = firstName || 'This person';
-  // Lower-case first letter of original text then prepend name
-  const body = text.charAt(0).toLowerCase() + text.slice(1);
-  return `${name} ${body}`;
-}
+// withFirstName is replaced by adaptStatement from statementTense.js
 
 export default function ReviewerAssessment({ onNavigate }) {
   const { currentUser, refresh } = useApp();
@@ -394,9 +386,9 @@ function SectionPanel({ section, employeeFirstName, ratings, onRate, stepNum, to
               <div className="flex items-start gap-3 mb-3">
                 <span className="text-xs font-bold text-gray-400 w-6 flex-shrink-0 mt-0.5">{idx + 1}.</span>
                 <div className="flex-1">
-                  {/* Prefixed with employee first name */}
+                  {/* Third-person with smart tense adapter */}
                   <p className="text-sm text-gray-800 font-medium leading-snug">
-                    {withFirstName(stmt.text, firstName)}
+                    {adaptStatement(stmt.text, 'reviewer', firstName)}
                   </p>
                   {stmt.reviewerTip && (
                     <p className="text-xs text-blue-600 mt-1 italic">{stmt.reviewerTip}</p>
@@ -503,7 +495,7 @@ function AssignmentRatingsPanel({ assignments, employeeName, employeeFirstName, 
                   <div className="flex items-start gap-2 mb-2">
                     <span className="text-xs font-bold text-gray-400 w-5 flex-shrink-0">{idx + 1}.</span>
                     <div className="flex-1">
-                      <p className="text-xs text-gray-700 font-medium">{withFirstName(q.text, firstName)}</p>
+                      <p className="text-xs text-gray-700 font-medium">{adaptStatement(q.text, 'reviewer', firstName)}</p>
                     </div>
                     {rObj && (
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${rObj.bg} ${rObj.textColor} border ${rObj.border}`}>

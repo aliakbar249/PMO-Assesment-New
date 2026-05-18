@@ -80,20 +80,31 @@ function CreateReviewerModal({ onSave, onClose }) {
     return (
       <div className="space-y-4">
         <Alert type="success">
-          <div className="font-semibold flex gap-2"><CheckCircle size={15} />Reviewer account created & approved!</div>
+          <div className="font-semibold flex gap-2">
+            <CheckCircle size={15} />
+            {result.isExistingUser
+              ? 'Reviewer linked to existing account & approved!'
+              : 'Reviewer account created & approved!'}
+          </div>
         </Alert>
         <div className="p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl space-y-2">
-          <p className="text-sm font-semibold text-amber-800 flex items-center gap-2"><KeyRound size={14} />Temporary Login Credentials</p>
+          <p className="text-sm font-semibold text-amber-800 flex items-center gap-2"><KeyRound size={14} />Login Credentials</p>
           <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-amber-200 text-sm">
             <span>Email: <strong>{form.email}</strong></span>
           </div>
           <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-amber-200 text-sm">
-            <span>Temp Password: <code className="font-bold text-amber-700">{result.tempPassword}</code></span>
+            <span>
+              {result.isExistingUser ? 'Current Password: ' : 'Temp Password: '}
+              <code className="font-bold text-amber-700">{result.tempPassword}</code>
+            </span>
             <button onClick={() => copy(result.tempPassword)} className="text-xs text-indigo-600 flex items-center gap-1 ml-2">
               {copied ? <><CheckCircle size={12} />Copied</> : <><Copy size={12} />Copy</>}
             </button>
           </div>
-          <p className="text-xs text-amber-700">⚠ Share with the reviewer. They must change the password on first login.</p>
+          {result.isExistingUser
+            ? <p className="text-xs text-blue-700">ℹ This person already has a reviewer account — a new review assignment was added for them.</p>
+            : <p className="text-xs text-amber-700">⚠ Share with the reviewer. They must change the password on first login.</p>
+          }
         </div>
         <Button className="w-full" onClick={onClose}>Done</Button>
       </div>

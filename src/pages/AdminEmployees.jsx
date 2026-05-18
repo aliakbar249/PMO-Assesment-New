@@ -4,7 +4,8 @@ import {
   getAllEmployees, updateEmployee, getAssessment, getAssignmentsByEmployee,
   getNominations, getAllReviewers,
   adminCreateEmployee, adminResetPassword, adminSetPassword, adminToggleUserStatus,
-  getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates, getEmployeeTemplateId
+  getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates, getEmployeeTemplateId,
+  adminCreateCompanyAdmin, getAllCompanyAdmins
 } from '../lib/supabase';
 import {
   Button, Card, Input, Select, Alert, Badge, PageHeader,
@@ -13,7 +14,8 @@ import {
 import {
   Users, Edit3, Eye, UserCheck, UserX, Search, Plus,
   CheckCircle, Clock, AlertCircle, Briefcase, Star, Mail, Phone,
-  Building2, KeyRound, Copy, Power, PowerOff, RefreshCw, Lock, Layers
+  Building2, KeyRound, Copy, Power, PowerOff, RefreshCw, Lock, Layers,
+  ShieldCheck, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 const DEPARTMENTS = ['Engineering', 'Project Management', 'Operations', 'Finance', 'HR', 'Sales', 'Marketing', 'IT', 'Legal', 'Procurement', 'Other'];
@@ -25,6 +27,97 @@ const STATUS_CONFIG = {
   inactive:  { label: 'Inactive',  variant: 'default', icon: Clock    },
   suspended: { label: 'Suspended', variant: 'danger',  icon: UserX    },
 };
+
+// ─── Create Company Admin Modal ───────────────────────────────
+function CreateCompanyAdminModal({ onSave, onClose }) {
+  const [form, setForm] = useState({ name: '', email: '', organization: '' });
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const set = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setErrors(er => ({ ...er, [k]: '' })); };
+
+  const validate = () => {
+    const e = {};
+    if (!form.name.trim())         e.name = 'Full name is required';
+    if (!form.email.trim())        e.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
+    if (!form.organization.trim()) e.organization = 'Organisation is required';
+    return e;
+  };
+
+  const handleSave = async () => {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setSaving(true);
+    const res = await adminCreateCompanyAdmin(form);
+    setSaving(false);
+    if (!res.success) { setErrors({ general: res.error }); return; }
+    setResult(res);
+    onSave();
+  };
+
+  const copy = (val) => {
+    navigator.clipboard?.writeText(val).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (result) {
+    return (
+      <div className="space-y-4">
+        <Alert type="success">
+          <div className="flex items-center gap-2 font-semibold mb-1">
+            <CheckCircle size={15} /> Company Admin account created!
+          </div>
+          <p className="text-xs text-emerald-700">Organisation: <strong>{form.organization}</strong></p>
+        </Alert>
+        <div className="p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl">
+          <p className="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-2">
+            <KeyRound size={15} />Temporary Login Credentials
+          </p>
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-amber-200">
+              <span className="text-gray-600">Email: <strong>{form.email}</strong></span>
+            </div>
+            <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-amber-200">
+              <span className="text-gray-600">Temp Password: <code className="font-bold text-amber-700">{result.tempPassword}</code></span>
+              <button onClick={() => copy(result.tempPassword)}
+                className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 ml-2">
+                {copied ? <><CheckCircle size={12} />Copied</> : <><Copy size={12} />Copy</>}
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-amber-700 mt-2">
+            ⚠ Share these credentials. The admin will be prompted to set a new password on first login.
+          </p>
+        </div>
+        <Button className="w-full" onClick={onClose}>Done</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {errors.general && (
+        <Alert type="error"><div className="flex gap-2"><AlertCircle size={14} />{errors.general}</div></Alert>
+      )}
+      <Input label="Full Name"    value={form.name}         onChange={set('name')}         error={errors.name}         required />
+      <Input label="Email Address" value={form.email}       onChange={set('email')}        error={errors.email}        type="email" required />
+      <Input label="Organisation"  value={form.organization} onChange={set('organization')} error={errors.organization} required
+        placeholder="Must match the organisation name used in employee profiles" />
+      <Alert type="info" className="mt-1">
+        This admin will only see employees whose organisation field matches exactly. A temporary password will be auto-generated.
+      </Alert>
+      <div className="flex gap-3 justify-end pt-1">
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSave} disabled={saving}>
+          <ShieldCheck size={14} />{saving ? 'Creating…' : 'Create Company Admin'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 // ─── Create Employee Modal ─────────────────────────────────────
 function CreateEmployeeModal({ onSave, onClose }) {
@@ -611,18 +704,28 @@ CREATE POLICY "allow_all" ON employee_template_assignments
 // ─── Main Page ─────────────────────────────────────────────────
 export default function AdminEmployees() {
   const { refresh, tick } = useApp();
-  const [employees,    setEmployees]    = useState([]);
-  const [search,       setSearch]       = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [deptFilter,   setDeptFilter]   = useState('all');
-  const [viewModal,    setViewModal]    = useState(null);
-  const [createModal,  setCreateModal]  = useState(false);
-  const [notification, setNotification] = useState({ msg: '', type: 'success' });
-  const [loading,      setLoading]      = useState(true);
+  const [employees,       setEmployees]       = useState([]);
+  const [companyAdmins,   setCompanyAdmins]   = useState([]);
+  const [search,          setSearch]          = useState('');
+  const [statusFilter,    setStatusFilter]    = useState('all');
+  const [deptFilter,      setDeptFilter]      = useState('all');
+  const [viewModal,       setViewModal]       = useState(null);
+  const [createModal,     setCreateModal]     = useState(false);
+  const [createAdminModal,setCreateAdminModal]= useState(false);
+  const [adminSectionOpen,setAdminSectionOpen]= useState(false);
+  const [notification,    setNotification]    = useState({ msg: '', type: 'success' });
+  const [loading,         setLoading]         = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    getAllEmployees().then(emps => { setEmployees(emps || []); setLoading(false); });
+    Promise.all([
+      getAllEmployees(),
+      getAllCompanyAdmins(),
+    ]).then(([emps, admins]) => {
+      setEmployees(emps || []);
+      setCompanyAdmins(admins || []);
+      setLoading(false);
+    });
   }, [tick]);
 
   const notify = (msg, type = 'success') => {
@@ -678,9 +781,14 @@ export default function AdminEmployees() {
         title="Employee Management"
         subtitle="Create, view, edit, and manage employee profiles and account access."
         action={
-          <Button onClick={() => setCreateModal(true)} size="sm">
-            <Plus size={15} />Create Employee
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setCreateAdminModal(true)} size="sm">
+              <ShieldCheck size={15} />Create Company Admin
+            </Button>
+            <Button onClick={() => setCreateModal(true)} size="sm">
+              <Plus size={15} />Create Employee
+            </Button>
+          </div>
         }
       />
 
@@ -787,6 +895,53 @@ export default function AdminEmployees() {
         Showing {filtered.length} of {employees.length} employees
       </div>
 
+      {/* Company Admins Section */}
+      <div className="mt-8 border border-amber-200 rounded-2xl overflow-hidden">
+        <button
+          onClick={() => setAdminSectionOpen(o => !o)}
+          className="w-full flex items-center justify-between px-5 py-3.5 bg-amber-50 hover:bg-amber-100 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={16} className="text-amber-600" />
+            <span className="text-sm font-semibold text-amber-800">Company Admins</span>
+            <span className="text-xs px-2 py-0.5 bg-amber-200 text-amber-800 rounded-full font-medium">{companyAdmins.length}</span>
+          </div>
+          {adminSectionOpen ? <ChevronUp size={16} className="text-amber-600" /> : <ChevronDown size={16} className="text-amber-600" />}
+        </button>
+
+        {adminSectionOpen && (
+          <div className="p-4 bg-white">
+            {companyAdmins.length === 0 ? (
+              <div className="text-center py-6 text-sm text-gray-400">
+                No company admins created yet. Click <strong>Create Company Admin</strong> above to add one.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {companyAdmins.map(ca => (
+                  <div key={ca.id}
+                    className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white text-sm font-bold">{ca.name?.[0]?.toUpperCase()}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-gray-800">{ca.name}</div>
+                      <div className="text-xs text-gray-500 truncate">{ca.email}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <Building2 size={12} className="text-amber-500" />
+                      <span className="text-xs font-medium text-amber-700">{ca.organization || '—'}</span>
+                    </div>
+                    <Badge variant="default" size="xs">
+                      {(ca.status || 'active') === 'active' ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Create Employee Modal */}
       <Modal open={createModal} onClose={() => setCreateModal(false)} title="Create New Employee" size="lg">
         <CreateEmployeeModal
@@ -807,6 +962,18 @@ export default function AdminEmployees() {
           />
         </Modal>
       )}
+
+      {/* Create Company Admin Modal */}
+      <Modal open={createAdminModal} onClose={() => setCreateAdminModal(false)} title="Create Company Admin Account" size="md">
+        <CreateCompanyAdminModal
+          onSave={() => {
+            notify('Company admin account created successfully.');
+            getAllCompanyAdmins().then(admins => setCompanyAdmins(admins || []));
+            setAdminSectionOpen(true);
+          }}
+          onClose={() => setCreateAdminModal(false)}
+        />
+      </Modal>
     </div>
   );
 }

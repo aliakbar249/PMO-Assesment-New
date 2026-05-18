@@ -188,6 +188,101 @@ export async function adminToggleUserStatus(userId, status) {
     .eq('user_id', userId);
 }
 
+// ─── Admin: Create a Company Admin account ────────────────────
+// company_admin can see all employees/results for their organisation
+export async function adminCreateCompanyAdmin(profile) {
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .ilike('email', profile.email.trim())
+    .maybeSingle();
+  if (existing) return { success: false, error: 'Email already registered.' };
+
+  const userId   = genId();
+  const tempPass = (profile.name || 'admin').split(' ')[0].toLowerCase() + '@co360';
+
+  const { error } = await supabase.from('users').insert({
+    id: userId,
+    role: 'company_admin',
+    email: profile.email.trim(),
+    password: tempPass,
+    name: profile.name,
+    organization: profile.organization || null,
+    password_reset: true,
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true, tempPassword: tempPass };
+}
+
+// ─── Company Admin: Get all users with role company_admin ─────
+export async function getAllCompanyAdmins() {
+  const { data } = await supabase
+    .from('users')
+    .select('id, name, email, organization, status, created_at')
+    .eq('role', 'company_admin')
+    .order('created_at', { ascending: false });
+  return (data || []).map(u => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    organization: u.organization,
+    status: u.status,
+    createdAt: u.created_at,
+  }));
+}
+
+// ─── Company Admin: Employees in their organisation ───────────
+export async function getCompanyEmployees(organization) {
+  if (!organization) return [];
+  const { data } = await supabase
+    .from('employees')
+    .select('*')
+    .ilike('organization', organization)
+    .order('created_at', { ascending: false });
+  return (data || []).map(mapEmployee);
+}
+
+// ─── Company Admin: Progress summary scoped to their org ──────
+export async function getCompanyProgressSummary(organization) {
+  if (!organization) return [];
+  const employees = await getCompanyEmployees(organization);
+  if (employees.length === 0) return [];
+
+  const empIds = employees.map(e => e.id);
+
+  const [assessments, assignments, nominations, reviews, reviewers] = await Promise.all([
+    supabase.from('assessments').select('*').in('employee_id', empIds),
+    supabase.from('assignments').select('employee_id').in('employee_id', empIds),
+    supabase.from('nominations').select('employee_id, approval_status').in('employee_id', empIds),
+    supabase.from('reviews').select('employee_id, status').in('employee_id', empIds),
+    supabase.from('reviewers').select('employee_id').in('employee_id', empIds),
+  ]);
+
+  const assmnts = assessments.data || [];
+  const asgns   = assignments.data || [];
+  const noms    = nominations.data || [];
+  const rvws    = reviews.data || [];
+
+  return employees.map(emp => {
+    const assessment      = assmnts.find(a => a.employee_id === emp.id);
+    const assignmentCount = asgns.filter(a => a.employee_id === emp.id).length;
+    const empNoms         = noms.filter(n => n.employee_id === emp.id);
+    const approvedCount   = empNoms.filter(n => n.approval_status === 'approved').length;
+    const completedReviews= rvws.filter(r => r.employee_id === emp.id && r.status === 'submitted').length;
+    const responses       = assessment?.responses || {};
+    const totalRated      = Object.values(responses).reduce((s, sec) => s + Object.keys(sec).length, 0);
+    return {
+      employee: emp,
+      selfAssessmentStatus: assessment?.status || 'not_started',
+      selfAssessmentProgress: totalRated > 0 ? Math.min(Math.round((totalRated / 76) * 100), 100) : 0,
+      assignmentCount,
+      nominationsSubmitted: empNoms.length > 0,
+      approvedReviewerCount: approvedCount,
+      completedReviewCount: completedReviews,
+    };
+  });
+}
+
 // ─── Employee Registration ─────────────────────────────────────
 export async function registerEmployee(profile) {
   // Check duplicate email
@@ -283,31 +378,42 @@ export async function adminCreateEmployee(profile) {
 }
 
 // ─── Admin: Create reviewer directly (without nomination flow) ──
+// If a user account already exists for this email, we REUSE it — the same
+// person can review multiple employees (separate nomination+reviewer rows each time).
+// This means you can create any number of reviewers without waiting for approval.
 export async function adminCreateReviewer(profile) {
-  const { data: existing } = await supabase
+  const { data: existingUser } = await supabase
     .from('users')
-    .select('id')
+    .select('id, password')
     .ilike('email', profile.email.trim())
     .maybeSingle();
 
-  if (existing) return { success: false, error: 'Email already registered.' };
+  const revId   = genId();
+  const nomId   = genId();
 
-  const userId   = genId();
-  const revId    = genId();
-  const nomId    = genId();
-  const tempPass = (profile.name || 'reviewer').split(' ')[0].toLowerCase() + '@360';
+  let userId   = existingUser?.id || null;
+  let tempPass = null;
 
-  const { error: ue } = await supabase.from('users').insert({
-    id: userId,
-    role: 'reviewer',
-    email: profile.email.trim(),
-    password: tempPass,
-    name: profile.name,
-    password_reset: true,
-  });
-  if (ue) return { success: false, error: ue.message };
+  if (!existingUser) {
+    // ── New user: create the login account ─────────────────────
+    userId   = genId();
+    tempPass = (profile.name || 'reviewer').split(' ')[0].toLowerCase() + '@360';
+    const { error: ue } = await supabase.from('users').insert({
+      id: userId,
+      role: 'reviewer',
+      email: profile.email.trim(),
+      password: tempPass,
+      name: profile.name,
+      password_reset: true,
+    });
+    if (ue) return { success: false, error: ue.message };
+  } else {
+    // ── Existing user: reuse account, surface temp password ────
+    // tempPass stays null — admin already has their credentials
+    tempPass = existingUser.password; // show existing password so admin can share it
+  }
 
-  // Create a nomination record (admin-created, auto-approved)
+  // Always create a NEW nomination row for this employee assignment
   const { error: ne } = await supabase.from('nominations').insert({
     id: nomId,
     employee_id: profile.employeeId,
@@ -322,10 +428,12 @@ export async function adminCreateReviewer(profile) {
     approval_status: 'approved',
   });
   if (ne) {
-    await supabase.from('users').delete().eq('id', userId);
+    // Only rollback user creation if we just created it
+    if (!existingUser) await supabase.from('users').delete().eq('id', userId);
     return { success: false, error: ne.message };
   }
 
+  // Always create a NEW reviewer row linked to this nomination + employee
   const { error: re } = await supabase.from('reviewers').insert({
     id: revId,
     user_id: userId,
@@ -334,12 +442,12 @@ export async function adminCreateReviewer(profile) {
     temp_password: tempPass,
   });
   if (re) {
-    await supabase.from('users').delete().eq('id', userId);
+    if (!existingUser) await supabase.from('users').delete().eq('id', userId);
     await supabase.from('nominations').delete().eq('id', nomId);
     return { success: false, error: re.message };
   }
 
-  return { success: true, tempPassword: tempPass };
+  return { success: true, tempPassword: tempPass, isExistingUser: !!existingUser };
 }
 
 // ─── Admin: Get user info linked to employee ───────────────────

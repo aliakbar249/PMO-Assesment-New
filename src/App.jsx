@@ -25,11 +25,15 @@ import AdminTemplates from './pages/AdminTemplates';
 import AdminExport from './pages/AdminExport';
 import AdminEmployees from './pages/AdminEmployees';
 
+// Company Admin pages
+import CompanyDashboard from './pages/CompanyDashboard';
+
 // Default pages per role
 const DEFAULT_PAGE = {
-  employee: 'emp-dashboard',
-  reviewer: 'rev-dashboard',
-  admin:    'adm-dashboard',
+  employee:      'emp-dashboard',
+  reviewer:      'rev-dashboard',
+  admin:         'adm-dashboard',
+  company_admin: 'co-dashboard',
 };
 
 function AppRouter() {
@@ -99,6 +103,15 @@ function AppRouter() {
         {page === 'adm-progress'  && <AdminProgress />}
         {page === 'adm-templates' && <AdminTemplates />}
         {page === 'adm-export'    && <AdminExport />}
+      </Layout>
+    );
+  }
+
+  // ── Company Admin pages ────────────────────────────────────
+  if (currentUser.role === 'company_admin') {
+    return (
+      <Layout page={page} onNavigate={navigate}>
+        {page === 'co-dashboard' && <CompanyDashboard />}
       </Layout>
     );
   }

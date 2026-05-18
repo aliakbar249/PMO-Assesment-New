@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   Star, LayoutDashboard, User, ClipboardList, Briefcase, Users,
-  Settings, LogOut, Menu, X, ChevronRight, Shield, Eye, UserCog
+  Settings, LogOut, Menu, X, ChevronRight, Shield, Eye, UserCog, Building2
 } from 'lucide-react';
 
 const NAV = {
@@ -25,12 +25,16 @@ const NAV = {
     { id: 'adm-templates',   label: 'Assessment Templates', icon: Settings },
     { id: 'adm-export',      label: 'Export Data',          icon: ClipboardList },
   ],
+  company_admin: [
+    { id: 'co-dashboard', label: 'Company Dashboard', icon: Building2 },
+  ],
 };
 
 const ROLE_BADGE = {
-  admin:    { label: 'Administrator', cls: 'bg-purple-100 text-purple-700' },
-  employee: { label: 'Employee',      cls: 'bg-emerald-100 text-emerald-700' },
-  reviewer: { label: 'Reviewer',      cls: 'bg-blue-100 text-blue-700' },
+  admin:         { label: 'Administrator', cls: 'bg-purple-100 text-purple-700' },
+  company_admin: { label: 'Company Admin', cls: 'bg-amber-100 text-amber-700'  },
+  employee:      { label: 'Employee',      cls: 'bg-emerald-100 text-emerald-700' },
+  reviewer:      { label: 'Reviewer',      cls: 'bg-blue-100 text-blue-700' },
 };
 
 export default function Layout({ page, onNavigate, children }) {
@@ -110,7 +114,8 @@ export default function Layout({ page, onNavigate, children }) {
           <div className="flex items-center gap-3">
             <button className="lg:hidden p-2 rounded-xl text-gray-500 hover:bg-gray-100" onClick={() => setMOpen(true)}><Menu size={20} /></button>
             <div className="hidden sm:flex items-center gap-2">
-              {currentUser?.role === 'admin' && <Shield size={14} className="text-purple-500" />}
+              {currentUser?.role === 'admin'         && <Shield   size={14} className="text-purple-500" />}
+            {currentUser?.role === 'company_admin'  && <Building2 size={14} className="text-amber-500" />}
               <span className="text-sm font-medium text-gray-600">{items.find(n => n.id === page)?.label || 'Dashboard'}</span>
             </div>
           </div>
