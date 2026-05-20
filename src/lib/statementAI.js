@@ -27,7 +27,7 @@ import { adaptStatement } from './statementTense';
 const API_KEY  = import.meta.env.VITE_OPENAI_API_KEY  || '';
 const BASE_URL = import.meta.env.VITE_OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1';
 const MODEL    = 'gpt-5-mini';   // fast, cheap — perfect for grammar transforms
-const CACHE_NS = 'stmtAI_v2_';  // bump suffix to invalidate old cache
+const CACHE_NS = 'stmtAI_v3_';  // v3: bumped to clear stale pre-fix cache entries
 
 // Whether we have a plausibly-valid key (non-empty, 20+ chars)
 // If false we skip the API call entirely and fall straight to rule-based
