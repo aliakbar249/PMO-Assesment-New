@@ -98,6 +98,30 @@ export async function initDb() {
 }
 
 // ─── Auth ──────────────────────────────────────────────────────
+// ─── Helper: promote 'admin' users that have a linked employees row ──────────
+// The live DB check constraint only allows role IN ('admin','employee','reviewer').
+// 'company_admin' was added in a migration that was never run.  Work-around:
+//   • company admins are stored with role='admin' in users
+//   • they also have a linked employees row (job_title='__company_admin__')
+//   • this helper detects that and rewrites role→'company_admin' + hydrates org
+async function hydrateCompanyAdminRole(userData) {
+  if (!userData) return userData;
+  // Already correctly typed (post-migration DB) — nothing to do
+  if (userData.role === 'company_admin') return userData;
+  // Only check 'admin' rows — employees/reviewers never have a linked employees row this way
+  if (userData.role !== 'admin') return userData;
+  const { data: emp } = await supabase
+    .from('employees')
+    .select('organization, job_title')
+    .eq('user_id', userData.id)
+    .maybeSingle();
+  if (emp && emp.job_title === '__company_admin__') {
+    userData.role         = 'company_admin';
+    userData.organization = emp.organization || null;
+  }
+  return userData;
+}
+
 export async function authenticate(email, password) {
   const { data, error } = await supabase
     .from('users')
@@ -106,31 +130,13 @@ export async function authenticate(email, password) {
     .eq('password', password)
     .maybeSingle();
   if (error || !data) return null;
-  // For company_admin: hydrate organization from employees table
-  if (data.role === 'company_admin' && !data.organization) {
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('organization')
-      .eq('user_id', data.id)
-      .maybeSingle();
-    if (emp?.organization) data.organization = emp.organization;
-  }
-  return data;
+  return hydrateCompanyAdminRole(data);
 }
 
 export async function getUserById(id) {
   const { data } = await supabase.from('users').select('*').eq('id', id).maybeSingle();
   if (!data) return null;
-  // For company_admin: hydrate organization from employees table
-  if (data.role === 'company_admin' && !data.organization) {
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('organization')
-      .eq('user_id', id)
-      .maybeSingle();
-    if (emp?.organization) data.organization = emp.organization;
-  }
-  return data;
+  return hydrateCompanyAdminRole(data);
 }
 
 // ─── Password Reset ────────────────────────────────────────────
@@ -221,23 +227,27 @@ export async function adminCreateCompanyAdmin(profile) {
   const empId    = genId();
   const tempPass = (profile.name || 'admin').split(' ')[0].toLowerCase() + '@co360';
 
-  // Insert user row — only columns that exist in all DB versions (no 'organization')
+  // role='admin' is used because the live DB check constraint only allows
+  // ('admin','employee','reviewer') — 'company_admin' was in a migration never run.
+  // The employees row with job_title='__company_admin__' is the marker that
+  // hydrateCompanyAdminRole() uses to rewrite role→'company_admin' at login.
   const { error } = await supabase.from('users').insert({
     id: userId,
-    role: 'company_admin',
+    role: 'admin',            // only safe role available in live DB
     email: profile.email.trim(),
     password: tempPass,
     name: profile.name,
   });
   if (error) return { success: false, error: error.message };
 
-  // Store organization in employees table so it survives without a schema migration
+  // Companion employees row: stores organization + acts as company_admin marker
   await supabase.from('employees').insert({
     id: empId,
     user_id: userId,
     name: profile.name,
     email: profile.email.trim(),
     organization: profile.organization || null,
+    job_title: '__company_admin__',   // sentinel — detected by hydrateCompanyAdminRole
     status: 'active',
   });
 
@@ -245,25 +255,27 @@ export async function adminCreateCompanyAdmin(profile) {
 }
 
 // ─── Company Admin: Get all users with role company_admin ─────
+// Company admins are stored as role='admin' in the live DB (constraint workaround)
+// but have a linked employees row with job_title='__company_admin__'.
 export async function getAllCompanyAdmins() {
-  const { data: admins } = await supabase
-    .from('users')
-    .select('id, name, email, status, created_at')
-    .eq('role', 'company_admin')
-    .order('created_at', { ascending: false });
-
-  if (!admins || admins.length === 0) return [];
-
-  // Fetch organization from employees table (stored there to avoid schema migration)
-  const adminIds = admins.map(u => u.id);
+  // Find sentinel employees rows first, then join to users
   const { data: empRows } = await supabase
     .from('employees')
     .select('user_id, organization')
-    .in('user_id', adminIds);
-  const orgMap = {};
-  for (const e of (empRows || [])) orgMap[e.user_id] = e.organization;
+    .eq('job_title', '__company_admin__');
 
-  return admins.map(u => ({
+  if (!empRows || empRows.length === 0) return [];
+
+  const adminIds = empRows.map(e => e.user_id).filter(Boolean);
+  const orgMap   = Object.fromEntries(empRows.map(e => [e.user_id, e.organization]));
+
+  const { data: users } = await supabase
+    .from('users')
+    .select('id, name, email, status, created_at')
+    .in('id', adminIds)
+    .order('created_at', { ascending: false });
+
+  return (users || []).map(u => ({
     id: u.id,
     name: u.name,
     email: u.email,
@@ -278,13 +290,11 @@ export async function getCompanyEmployees(organization) {
   if (!organization) return [];
   const { data } = await supabase
     .from('employees')
-    .select('*, users!employees_user_id_fkey(role)')
+    .select('*')
     .ilike('organization', organization)
+    .neq('job_title', '__company_admin__')   // exclude company_admin placeholder rows
     .order('created_at', { ascending: false });
-  // Exclude company_admin placeholder rows (they have no job_title and their user role is company_admin)
-  return (data || [])
-    .filter(row => row.users?.role !== 'company_admin')
-    .map(mapEmployee);
+  return (data || []).map(mapEmployee);
 }
 
 // ─── Company Admin: Progress summary scoped to their org ──────
