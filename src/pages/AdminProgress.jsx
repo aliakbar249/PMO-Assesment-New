@@ -80,11 +80,11 @@ function EmployeeResultsPanel({ employeeId, employeeName }) {
       <div className="mb-4 p-3 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-xl border border-indigo-100">
         <p className="text-xs font-semibold text-gray-600 mb-2">Overall Scores Aggregated:</p>
         <div className="flex gap-2 flex-wrap">
-          <AvgPill label="PM Self-Avg"   value={overallSelf}    color="indigo"  />
-          <AvgPill label="Sponsor Avg"   value={overallSponsor} color="purple"  />
-          <AvgPill label="Peers Avg"     value={overallPeer}    color="blue"    />
-          <AvgPill label="Team Avg"      value={overallTeam}    color="amber"   />
-          <AvgPill label="Overall"       value={overallAll}     color="emerald" />
+          <AvgPill label="Self-Avg"        value={overallSelf}    color="indigo"  />
+          <AvgPill label="Sponsor/Sup"     value={overallSponsor} color="purple"  />
+          <AvgPill label="Peers/Client"    value={overallPeer}    color="blue"    />
+          <AvgPill label="Team Members"    value={overallTeam}    color="amber"   />
+          <AvgPill label="Overall"         value={overallAll}     color="emerald" />
         </div>
       </div>
 
@@ -96,9 +96,9 @@ function EmployeeResultsPanel({ employeeId, employeeName }) {
             <tr className="border-b border-gray-100">
               <th className="text-left py-2 pr-3 font-semibold text-gray-500">Section</th>
               <th className="text-center py-2 px-2 font-semibold text-indigo-600">Self</th>
-              <th className="text-center py-2 px-2 font-semibold text-purple-600">Sponsor</th>
-              <th className="text-center py-2 px-2 font-semibold text-blue-600">Peers</th>
-              <th className="text-center py-2 px-2 font-semibold text-amber-600">Team</th>
+              <th className="text-center py-2 px-2 font-semibold text-purple-600">Sponsor/Sup</th>
+              <th className="text-center py-2 px-2 font-semibold text-blue-600">Peers/Client</th>
+              <th className="text-center py-2 px-2 font-semibold text-amber-600">Team Mbrs</th>
               <th className="text-center py-2 px-2 font-semibold text-emerald-600">Overall</th>
             </tr>
           </thead>
@@ -138,6 +138,7 @@ function EmployeeResultsPanel({ employeeId, employeeName }) {
       </div>
       <p className="text-xs text-gray-400 mt-2">
         Scale 1–5 · "—" means no submitted ratings for that reviewer type in this section.
+        Sponsor/Sup = sponsors + supervisors · Peers/Client = peers + clients · Team Mbrs = team members.
         Not-Observed (0) ratings are excluded from averages.
       </p>
     </div>

@@ -1479,11 +1479,25 @@ export async function getAssessmentResults(employeeId) {
       .select('id, reviewer_type')
       .eq('employee_id', employeeId);
 
-    // Build: reviewerId → reviewerType
+    // Build: reviewerId → display bucket
+    // DB reviewer_type values: 'sponsor' | 'supervisor' | 'peer' | 'teamMember' | 'client'
+    // Display buckets:
+    //   sponsorAvg  ← sponsor, supervisor  (senior/line raters)
+    //   peerAvg     ← peer, client         (lateral raters)
+    //   teamAvg     ← teamMember           (direct-report raters)
+    const TYPE_TO_BUCKET = {
+      sponsor:    'sponsor',
+      supervisor: 'sponsor',
+      peer:       'peer',
+      client:     'peer',
+      teamMember: 'team',
+      team:       'team',   // legacy value guard
+    };
+
     const revTypeMap = {};
     for (const rev of (reviewerRows || [])) {
       const nom = (nomRows || []).find(n => n.id === rev.nomination_id);
-      if (nom) revTypeMap[rev.id] = nom.reviewer_type; // 'peer' | 'sponsor' | 'team'
+      if (nom) revTypeMap[rev.id] = TYPE_TO_BUCKET[nom.reviewer_type] || null;
     }
 
     // Helper: compute average score for a section from a responses object
@@ -1501,13 +1515,13 @@ export async function getAssessmentResults(employeeId) {
         ? sectionAvg(selfData.responses || {}, sec.id)
         : null;
 
-      // Group reviewer responses by type
+      // Group reviewer responses by display bucket
       const byType = { sponsor: [], peer: [], team: [] };
       for (const rv of (reviewRows || [])) {
-        const type = revTypeMap[rv.reviewer_id];
+        const bucket = revTypeMap[rv.reviewer_id];
         const avg = sectionAvg(rv.responses || {}, sec.id);
-        if (avg !== null && type && byType[type] !== undefined) {
-          byType[type].push(avg);
+        if (avg !== null && bucket && byType[bucket] !== undefined) {
+          byType[bucket].push(avg);
         }
       }
 
