@@ -106,12 +106,31 @@ export async function authenticate(email, password) {
     .eq('password', password)
     .maybeSingle();
   if (error || !data) return null;
+  // For company_admin: hydrate organization from employees table
+  if (data.role === 'company_admin' && !data.organization) {
+    const { data: emp } = await supabase
+      .from('employees')
+      .select('organization')
+      .eq('user_id', data.id)
+      .maybeSingle();
+    if (emp?.organization) data.organization = emp.organization;
+  }
   return data;
 }
 
 export async function getUserById(id) {
   const { data } = await supabase.from('users').select('*').eq('id', id).maybeSingle();
-  return data || null;
+  if (!data) return null;
+  // For company_admin: hydrate organization from employees table
+  if (data.role === 'company_admin' && !data.organization) {
+    const { data: emp } = await supabase
+      .from('employees')
+      .select('organization')
+      .eq('user_id', id)
+      .maybeSingle();
+    if (emp?.organization) data.organization = emp.organization;
+  }
+  return data;
 }
 
 // ─── Password Reset ────────────────────────────────────────────
@@ -199,33 +218,56 @@ export async function adminCreateCompanyAdmin(profile) {
   if (existing) return { success: false, error: 'Email already registered.' };
 
   const userId   = genId();
+  const empId    = genId();
   const tempPass = (profile.name || 'admin').split(' ')[0].toLowerCase() + '@co360';
 
+  // Insert user row — only columns that exist in all DB versions (no 'organization')
   const { error } = await supabase.from('users').insert({
     id: userId,
     role: 'company_admin',
     email: profile.email.trim(),
     password: tempPass,
     name: profile.name,
-    organization: profile.organization || null,
-    password_reset: true,
   });
   if (error) return { success: false, error: error.message };
+
+  // Store organization in employees table so it survives without a schema migration
+  await supabase.from('employees').insert({
+    id: empId,
+    user_id: userId,
+    name: profile.name,
+    email: profile.email.trim(),
+    organization: profile.organization || null,
+    status: 'active',
+  });
+
   return { success: true, tempPassword: tempPass };
 }
 
 // ─── Company Admin: Get all users with role company_admin ─────
 export async function getAllCompanyAdmins() {
-  const { data } = await supabase
+  const { data: admins } = await supabase
     .from('users')
-    .select('id, name, email, organization, status, created_at')
+    .select('id, name, email, status, created_at')
     .eq('role', 'company_admin')
     .order('created_at', { ascending: false });
-  return (data || []).map(u => ({
+
+  if (!admins || admins.length === 0) return [];
+
+  // Fetch organization from employees table (stored there to avoid schema migration)
+  const adminIds = admins.map(u => u.id);
+  const { data: empRows } = await supabase
+    .from('employees')
+    .select('user_id, organization')
+    .in('user_id', adminIds);
+  const orgMap = {};
+  for (const e of (empRows || [])) orgMap[e.user_id] = e.organization;
+
+  return admins.map(u => ({
     id: u.id,
     name: u.name,
     email: u.email,
-    organization: u.organization,
+    organization: orgMap[u.id] || null,
     status: u.status,
     createdAt: u.created_at,
   }));
@@ -236,10 +278,13 @@ export async function getCompanyEmployees(organization) {
   if (!organization) return [];
   const { data } = await supabase
     .from('employees')
-    .select('*')
+    .select('*, users!employees_user_id_fkey(role)')
     .ilike('organization', organization)
     .order('created_at', { ascending: false });
-  return (data || []).map(mapEmployee);
+  // Exclude company_admin placeholder rows (they have no job_title and their user role is company_admin)
+  return (data || [])
+    .filter(row => row.users?.role !== 'company_admin')
+    .map(mapEmployee);
 }
 
 // ─── Company Admin: Progress summary scoped to their org ──────
@@ -1551,15 +1596,16 @@ export async function getAssessmentResults(employeeId) {
 
 // ─── Export ────────────────────────────────────────────────────
 export async function getFullExportData() {
-  const [employees, users, assessments, assignments, nominations, reviews, sections, statements] = await Promise.all([
+  const [employees, users, assessments, assignments, nominations, reviews, sections, statements, reviewerRows] = await Promise.all([
     supabase.from('employees').select('*'),
     supabase.from('users').select('id, email, role, name, created_at'),
     supabase.from('assessments').select('*'),
     supabase.from('assignments').select('*'),
-    supabase.from('nominations').select('*'),
+    supabase.from('nominations').select('*, employees(name)'),
     supabase.from('reviews').select('*'),
     supabase.from('template_sections').select('*'),
     supabase.from('template_statements').select('*'),
+    supabase.from('reviewers').select('*, nominations(*)'),
   ]);
 
   const templates = (sections.data || []).map(sec => ({
@@ -1573,6 +1619,28 @@ export async function getFullExportData() {
       .map(st => ({ id: st.id, text: st.text })),
   }));
 
+  // Build reviewers list — keyed by reviewers.id (FK used by reviews.reviewer_id)
+  const reviewers = (reviewerRows.data || []).map(rev => {
+    const nom = rev.nominations || {};
+    return {
+      id: rev.id,                          // reviewers.id (= reviews.reviewer_id)
+      nominationId: rev.nomination_id,
+      employeeId: rev.employee_id,
+      forEmployeeName: nom.employees?.name || null,
+      name: nom.name || '',
+      email: nom.email || '',
+      designation: nom.designation || '',
+      department: nom.department || '',
+      phone: nom.phone || '',
+      role: nom.role || '',
+      category: nom.reviewer_type || '',
+      status: nom.approval_status || '',
+      approvedAt: nom.updated_at || null,
+      rejectedAt: null,
+      rejectionReason: nom.rejection_reason || '',
+    };
+  });
+
   return {
     employees: (employees.data || []).map(mapEmployee),
     users: users.data || [],
@@ -1584,7 +1652,7 @@ export async function getFullExportData() {
       submittedAt: a.submitted_at,
     })),
     assignmentRecords: (assignments.data || []).map(mapAssignment),
-    nominations: nominations.data || [],
+    nominations: (nominations.data || []).map(mapNomination),
     reviews: (reviews.data || []).map(r => ({
       id: r.id,
       reviewerId: r.reviewer_id,
@@ -1594,6 +1662,7 @@ export async function getFullExportData() {
       status: r.status,
       submittedAt: r.submitted_at,
     })),
+    reviewers,
     templates,
   };
 }
