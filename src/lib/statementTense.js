@@ -1,214 +1,260 @@
 // ─── Statement Tense Adapter ─────────────────────────────────────────────────
-// Statements are stored in a neutral 3rd-person singular form (no explicit
-// subject, capitalised verb: "Ensures…", "Engages…", "Is comfortable…").
+// Statements are stored in the DB in FIRST-PERSON INFINITIVE form with no
+// subject, e.g.:
+//   "trust my team and stakeholders"
+//   "am willing to make tough decisions when needed"
+//   "team is empowered to operate independently"
+//   "As a team we seek to develop creative solutions"
+//
 // This module converts them for display:
 //
-//   SELF     →  "I ensure…"    / "My team is empowered…"
-//   REVIEWER →  "Tom ensures…" / "Tom's team is empowered…"
+//   SELF     →  "I trust my team…"       / "My team is empowered…"
+//   REVIEWER →  "Sarah trusts Sarah's…"  / "Sarah's team is empowered…"
 //
-// Processing order:
-//  1.  "The entire team…"         → My/[Name]'s entire team…
-//  2.  "The team…"                → My/[Name]'s team…
-//  3.  "As a team…"               → kept as-is (self) / [Name]'s team: … (reviewer)
-//  4.  "Team communications…"     → My/[Name]'s team's communications…
-//  5.  Named-rewrite table        → exact-match rewrites for irregular statements
-//  6.  "Views themselves…"        → I view myself… / [Name] views themselves…
-//  7.  "Is …" (linking verb)      → I am… / [Name] is…
-//  8.  Verb-first (the majority)  → de-conjugate for self, keep for reviewer
-//  +   Reviewer pronoun fixes
+// Processing order (first match wins):
+//  1.  "The entire team…"            → My/[Name]'s entire team…
+//  2.  "Team communications…"        → My/[Name]'s team's communications…
+//  3.  "team …" (no article)         → My/[Name]'s team…
+//  4.  "As a team we …"              → kept (self) / [Name]'s team [verb+s]… (reviewer)
+//  5.  "am …"                        → I am… / [Name] is…
+//  6.  "view myself…"                → I view myself… / [Name] views themselves…
+//  7.  "When decisions are taken…"   → exact rewrite (contains embedded "I")
+//  8.  "If I am not sure…"           → exact rewrite
+//  9.  "don't avoid conflict…"       → I don't… / [Name] doesn't…
+// 10.  All other infinitives         → I [verb]… / [Name] [verb+s]…
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── toInfinitive ─────────────────────────────────────────────────────────────
-// Converts a 3rd-person-singular present verb to its base/infinitive form.
-// Examples:
-//   ensures   → ensure    prioritizes → prioritize    pushes → push
-//   identifies→ identify  replies     → reply         trusts → trust
-//   addresses → address   engages     → engage        works  → work
-function toInfinitive(verb) {
+// ─── toThirdPerson ────────────────────────────────────────────────────────────
+// Converts a base-form VERB to 3rd-person singular present.
+// Guards against modal/auxiliary verbs and adverbs.
+const MODALS = new Set(['can', 'could', 'will', 'would', 'shall', 'should',
+                         'may', 'might', 'must', 'need', 'dare', 'ought']);
+
+// Words ending in these suffixes are almost certainly adverbs/adjectives,
+// not verbs — skip conjugation entirely.
+const NON_VERB_SUFFIX_RE = /(?:ly|ful|ous|ive|ible|able|ment|ness|tion|sion|ity)$/;
+
+function toThirdPerson(verb) {
   const v = verb.toLowerCase().trim();
 
-  // Irregulars first
-  const IRREGULAR = { is: 'be', has: 'have', does: 'do', goes: 'go' };
-  if (IRREGULAR[v]) return IRREGULAR[v];
+  // Modals never inflect
+  if (MODALS.has(v)) return v;
 
-  // -izes / -ises  (prioritizes→prioritize, recognizes→recognize) — before general -es
-  if (v.endsWith('izes') || v.endsWith('ises')) return v.slice(0, -1);
+  // Adverbs / adjectives / nouns — return as-is
+  if (NON_VERB_SUFFIX_RE.test(v)) return v;
 
-  // -ies → -y  (replies→reply, identifies→identify, tries→try)
-  if (v.endsWith('ies') && v.length > 4) return v.slice(0, -3) + 'y';
+  // Irregulars
+  if (v === 'be')   return 'is';
+  if (v === 'have') return 'has';
+  if (v === 'do')   return 'does';
+  if (v === 'go')   return 'goes';
 
-  // -sses → -ss  (addresses→address, assesses→assess)
-  if (v.endsWith('sses')) return v.slice(0, -2);
+  // Ends in consonant + y → drop y, add -ies  (reply→replies, try→tries)
+  if (/[^aeiou]y$/.test(v)) return v.slice(0, -1) + 'ies';
 
-  // -ches / -shes / -xes → drop -es  (watches→watch, pushes→push, fixes→fix)
-  if (v.endsWith('ches') || v.endsWith('shes') || v.endsWith('xes')) return v.slice(0, -2);
+  // Ends in s, x, z, ch, sh → add -es  (push→pushes, address→addresses)
+  if (/(?:s|x|z|ch|sh)$/.test(v)) return v + 'es';
 
-  // -oes → -o  (goes already handled above; echoes→echo, vetoes→veto)
-  if (v.endsWith('oes') && v.length > 3) return v.slice(0, -2);
-
-  // -es where stripping -s leaves a word ending in -e
-  //   ensures→ensure, engages→engage, provides→provide, creates→create, makes→make
-  if (v.endsWith('es') && v.length > 3) {
-    const minusS = v.slice(0, -1);          // "ensures" → "ensure"
-    if (minusS.endsWith('e')) return minusS; // keep "ensure" (ends in e)
-    return v.slice(0, -2);                  // otherwise drop both chars
-  }
-
-  // Plain -s  (trusts→trust, works→work, asks→ask, meets→meet, keeps→keep)
-  if (v.endsWith('s') && v.length > 3) return v.slice(0, -1);
-
-  return v; // fallback: already base form
+  // Default: add -s
+  return v + 's';
 }
 
-// ─── De-conjugate compounds: "and/or [Verb-3ps]" inside a sentence ────────────
-// "Works and seeks input…"             → " and seek input…"
-// "Meets those timelines or provides…" → " or provide…"
-//
-// Guards against false positives on plural nouns like "stakeholders", "members":
-// we skip words with noun-typical suffixes (-ers, -ors, -ees, -ists, -ings, -ments,
-// -lines, -bles when standalone, -bers) and only de-conjugate known verb patterns.
-const NOUN_SUFFIX_RE = /(?:ders|ters|ners|bers|ers|ors|ees|ists|ings|ments|lines|bles|ples)$/;
+// ─── fixReviewerBody ──────────────────────────────────────────────────────────
+// Transforms first-person references throughout the body of a reviewer sentence:
+//   "my"     → "[Name]'s"
+//   "myself" → "themselves"
+//   "me"     → "[Name]"     (object pronoun: "advises me", "trust me")
+//   "I"      → "[Name]"     (subject pronoun: "team and I work")
+// Also conjugates verbs that immediately follow the replaced "I":
+//   "what I need" → "what Sarah needs"
+//   "so I know"   → "so Sarah knows"
+function fixReviewerBody(text, name) {
+  let result = text;
 
-function fixCompoundVerbs(remainder) {
+  // 1. my → [Name]'s
+  result = result.replace(/\bmy\b/gi, name + "'s");
+
+  // 2. myself → themselves
+  result = result.replace(/\bmyself\b/gi, 'themselves');
+
+  // 3. me → [Name]   (object pronoun)
+  result = result.replace(/\bme\b/g, name);
+
+  // 4. "I [adverb*] [verb]" → "[Name] [adverb*] [verb+s]"
+  //    Handles: "I use" → "Sarah uses"
+  //             "I actively listen" → "Sarah actively listens"
+  //    Skip when I is part of a compound subject ("and I", "or I").
+  result = result.replace(/\bI\s+((?:[a-z]+ly\s+)*)([a-z]+)/g, (match, adverbs, verb, offset) => {
+    const before = result.slice(Math.max(0, offset - 6), offset).toLowerCase();
+    if (/\b(and|or)\s+$/.test(before)) {
+      // Compound subject: replace I→name, keep verb base-form
+      return name + ' ' + adverbs + verb;
+    }
+    return name + ' ' + adverbs + toThirdPerson(verb);
+  });
+
+  // 5. Remaining bare "I" not followed by a verb (edge cases)
+  result = result.replace(/\bI\b/g, name);
+
+  return result;
+}
+
+// ─── fixCompoundVerbs ─────────────────────────────────────────────────────────
+// In reviewer mode, conjugate "and/or [verb]" in the remainder to match
+// the 3rd-person subject already established.
+// "follows through on plans and maintain good call discipline"
+//   → "follows through on plans and maintains good call discipline"
+// Skips proper nouns (Title-case), clear noun suffixes, and modals.
+const NOUN_SUFFIX_RE = /(?:ders|ters|ners|bers|ers|ors|ees|ists|ings|ments|lines|bles|ples|ness|tion|sion|ity|ory|ary|ery)$/;
+
+function fixCompoundVerbs(remainder, name) {
   return remainder.replace(
-    /\b(and|or)\s+([A-Za-z]{3,})\b/g,
+    /\b(and|or)\s+([A-Za-z]{2,})\b/g,
     (match, conj, v) => {
       const vl = v.toLowerCase();
-      // Skip words that look like plural nouns
+      // Skip Title-case words — likely proper nouns (e.g. "and Sarah")
+      if (v.charAt(0) !== v.charAt(0).toLowerCase()) return match;
+      // Skip words that are clearly nouns/adjectives
       if (NOUN_SUFFIX_RE.test(vl)) return match;
-      // Skip unless it ends in a verb suffix (-s or -es)
-      if (!vl.endsWith('s')) return match;
-      const inf = toInfinitive(vl);
-      // Only replace if toInfinitive actually changed something (i.e. it was conjugated)
-      return inf !== vl ? conj + ' ' + inf : match;
+      // Skip modals — they never inflect
+      if (MODALS.has(vl)) return match;
+      const conjugated = toThirdPerson(vl);
+      // Only replace if conjugation actually changed something
+      return conjugated !== vl ? conj + ' ' + conjugated : match;
     }
   );
 }
-
-// ─── Named rewrites for irregular / passive / adverb-first statements ─────────
-// These are statements that can't be handled by the generic verb-prefix rules.
-// Matched in order against the lower-cased statement text.
-const NAMED_REWRITES = [
-  {
-    // "Conflicts are not avoided and are dealt with constructively" — noun-first passive
-    match: /^conflicts are/i,
-    self:     'In my team, conflicts are not avoided and are dealt with constructively',
-    reviewer: (name) => `In ${name}'s team, conflicts are not avoided and are dealt with constructively`,
-  },
-  {
-    // "Benefits alignment is discussed as a team" — noun-first ("Benefits" is a noun here)
-    match: /^benefits alignment/i,
-    self:     'I ensure benefits alignment is discussed as a team',
-    reviewer: (name) => `${name} ensures benefits alignment is discussed as a team`,
-  },
-  {
-    // "Actively listens and pays attention" — adverb-first (verb is the 2nd word)
-    match: /^actively listens/i,
-    self:     'I actively listen and pay attention',
-    reviewer: (name) => `${name} actively listens and pays attention`,
-  },
-  {
-    // "When decisions are taken, action steps are ensured" — subordinate-clause-first
-    match: /^when decisions are taken/i,
-    self:     'I ensure action steps are taken when decisions are made',
-    reviewer: (name) => `${name} ensures action steps are taken when decisions are made`,
-  },
-];
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 /**
  * adaptStatement(text, mode, firstName)
  *
- * @param {string} text        - Raw statement text from the data file
- * @param {'self'|'reviewer'}  mode
- * @param {string} firstName   - Employee first name (used for reviewer mode only)
- * @returns {string}           - Display-ready grammatically correct sentence
+ * @param {string}            text       - Raw statement text from the DB
+ * @param {'self'|'reviewer'} mode
+ * @param {string}            firstName  - Employee first name (reviewer mode only)
+ * @returns {string}                     - Display-ready grammatically correct sentence
  */
 export function adaptStatement(text, mode, firstName) {
   if (!text) return text;
 
-  const name  = firstName || 'This person';
-  const lower = text.trim().toLowerCase();
+  const raw   = text.trim();
+  const lower = raw.toLowerCase();
+  const name  = (firstName || 'This person').trim();
+
+  // Self helper: "I" + lowercase-first-char version of raw
+  const selfPrefix = () => 'I ' + raw.charAt(0).toLowerCase() + raw.slice(1);
 
   // ── 1. "The entire team…" ──────────────────────────────────────────────────
   if (lower.startsWith('the entire team')) {
-    const rest = text.slice('The entire team'.length);
+    const rest = raw.slice('The entire team'.length);
+    if (mode === 'self') return 'My entire team' + rest;
+    // Fix embedded "me" references: "(including me)" → "(including [Name])"
+    return name + "'s entire team" + rest.replace(/\bme\b/g, name);
+  }
+
+  // ── 2. "Team communications…" ─────────────────────────────────────────────
+  if (lower.startsWith('team communications')) {
+    const rest = raw.slice('Team communications'.length);
+    if (mode === 'self') return "My team's communications" + rest;
+    return name + "'s team's communications" + rest;
+  }
+
+  // ── 3. "team …" (no article, lowercase or Title-case) ────────────────────
+  // Covers: "team is empowered", "team and stakeholders are engaged",
+  //         "team knows that I support them", "team and I work to…",
+  //         "team advises me of issues immediately", etc.
+  if (lower.startsWith('team ')) {
+    const rest = raw.slice('team'.length); // keeps leading space
     if (mode === 'self') {
-      return ('My entire team' + rest).replace(/\bthis person\b/gi, 'me');
+      return 'My team' + rest;
     }
-    return (name + "'s entire team" + rest).replace(/\bthis person\b/gi, name);
+    // Reviewer: replace embedded I/me/my in rest
+    return name + "'s team" + fixReviewerBody(rest, name);
   }
 
-  // ── 2. "The team…" ────────────────────────────────────────────────────────
-  if (lower.startsWith('the team')) {
-    const rest = text.slice('The team'.length);
-    return mode === 'self'
-      ? 'My team' + rest
-      : name + "'s team" + rest;
-  }
-
-  // ── 3. "As a team…" ───────────────────────────────────────────────────────
-  // Passive form ("As a team, solutions are sought") — kept for self; reworded for reviewer.
+  // ── 4. "As a team we …" ───────────────────────────────────────────────────
   if (lower.startsWith('as a team')) {
     if (mode === 'self') {
-      return text; // reads naturally as written
+      // Capitalise and keep as-is — reads naturally in self-assessment
+      return raw.charAt(0).toUpperCase() + raw.slice(1);
     }
-    const afterComma = text.slice('As a team'.length).replace(/^,\s*/, '');
-    return name + "'s team: " + afterComma.charAt(0).toUpperCase() + afterComma.slice(1);
+    // Reviewer: strip "As a team we " → "[Name]'s team [verb+s] …"
+    const afterWe = raw.replace(/^as a team\s+we\s+/i, '');
+    const spIdx   = afterWe.indexOf(' ');
+    const verb    = spIdx >= 0 ? afterWe.slice(0, spIdx) : afterWe;
+    const rest    = spIdx >= 0 ? afterWe.slice(spIdx)    : '';
+    return name + "'s team " + toThirdPerson(verb) + rest;
   }
 
-  // ── 4. "Team communications…" ─────────────────────────────────────────────
-  if (lower.startsWith('team communications')) {
-    const rest = text.slice('Team communications'.length);
-    return mode === 'self'
-      ? "My team's communications" + rest
-      : name + "'s team's communications" + rest;
+  // ── 5. "am …" statements (implicit "I am") ────────────────────────────────
+  // DB: "am willing to make tough decisions when needed"
+  //     "am mindful about the words I use when I speak to others"
+  if (lower.startsWith('am ')) {
+    const rest = raw.slice(3); // everything after "am "
+    if (mode === 'self') return 'I am ' + rest;
+    // Reviewer: fix any embedded I/my/me inside the body
+    return name + ' is ' + fixReviewerBody(rest, name);
   }
 
-  // ── 5. Named rewrites for irregular statements ────────────────────────────
-  for (const rule of NAMED_REWRITES) {
-    if (rule.match.test(lower)) {
-      return mode === 'self' ? rule.self : rule.reviewer(name);
-    }
-  }
-
-  // ── 6. "Views themselves…" ────────────────────────────────────────────────
-  if (lower.startsWith('views themselves')) {
-    const rest = text.slice('views themselves'.length);
+  // ── 6. "view myself…" ─────────────────────────────────────────────────────
+  if (lower.startsWith('view myself')) {
+    const rest = raw.slice('view myself'.length);
     if (mode === 'self') {
-      return 'I view myself' + rest.replace(/\band is\b/gi, 'and am');
+      return 'I view myself' + rest.replace(/\band am\b/gi, 'and am');
     }
-    return name + ' views themselves' + rest;
+    return name + ' views themselves' + rest.replace(/\band am\b/gi, 'and is');
   }
 
-  // ── 7. "Is …" (linking verb start) ───────────────────────────────────────
-  if (lower.startsWith('is ')) {
-    const rest = text.slice(3);
-    return mode === 'self'
-      ? 'I am ' + rest.charAt(0).toLowerCase() + rest.slice(1)
-      : name + ' is ' + rest.charAt(0).toLowerCase() + rest.slice(1);
+  // ── 7. "When decisions are taken, I ensure action steps are taken" ─────────
+  if (lower.startsWith('when decisions are taken')) {
+    if (mode === 'self') return 'When decisions are taken, I ensure action steps are taken';
+    return 'When decisions are taken, ' + name + ' ensures action steps are taken';
   }
 
-  // ── 8. Verb-first statements (the large majority) ─────────────────────────
-  // Raw text: "Ensures project information is shared…"
-  //   self     → "I ensure project information is shared…"   (de-conjugated)
-  //   reviewer → "Sarah ensures project information is shared…" (kept conjugated)
-  const spaceIdx   = text.indexOf(' ');
-  const firstWord  = spaceIdx >= 0 ? text.slice(0, spaceIdx) : text;
-  const remainder  = spaceIdx >= 0 ? text.slice(spaceIdx) : '';   // includes leading space
+  // ── 8. "If I am not sure about something, then I make that clear" ──────────
+  if (lower.startsWith('if i am not sure')) {
+    if (mode === 'self') return 'If I am not sure about something, then I make that clear';
+    return 'If ' + name + ' is not sure about something, then ' + name + ' makes that clear';
+  }
+
+  // ── 9. "don't avoid conflict, and we deal with it constructively" ──────────
+  if (lower.startsWith("don't") || lower.startsWith("dont")) {
+    if (mode === 'self') return "I don't avoid conflict, and we deal with it constructively";
+    return name + " doesn't avoid conflict, and the team deals with it constructively";
+  }
+
+  // ── 10. All other infinitive-led statements (the large majority) ───────────
+  // DB format: "trust my team and stakeholders"          → I trust my team…
+  //            "ensure project information is shared…"   → I ensure project…
+  //            "explain my decisions to the team…"       → I explain my decisions…
+  //            "work with my team to proactively…"       → I work with my team…
+  //            "consistently work within company…"       → I consistently work…
+  //                                                         Sarah consistently works…
 
   if (mode === 'self') {
-    const infinitive      = toInfinitive(firstWord);
-    const fixedRemainder  = fixCompoundVerbs(remainder);
-    return 'I ' + infinitive + fixedRemainder;
+    // Prepend "I " with the verb lowercased
+    return selfPrefix();
   }
 
-  // Reviewer: keep original conjugated verb, fix pronouns in body
-  const conjugated = firstWord.charAt(0).toLowerCase() + firstWord.slice(1);
-  let result = name + ' ' + conjugated + remainder;
-  result = result
-    .replace(/\bmy\b/gi,          name + "'s")
-    .replace(/\bmyself\b/gi,      'themselves')
-    .replace(/\bthis person\b/gi, name);
-  return result;
+  // Reviewer: find the first true verb (skip leading adverbs like "consistently")
+  const words = raw.split(' ');
+  let verbIdx = 0;
+  while (verbIdx < words.length - 1 && NON_VERB_SUFFIX_RE.test(words[verbIdx].toLowerCase())) {
+    verbIdx++;
+  }
+
+  // Build the reviewer sentence:
+  // prefix = any leading adverbs (e.g. "consistently ")
+  // verb   = the first real verb (conjugated)
+  // rest   = everything after the verb
+  const prefix    = verbIdx > 0 ? words.slice(0, verbIdx).join(' ') + ' ' : '';
+  const firstVerb = words[verbIdx];
+  const remainder = words.slice(verbIdx + 1).length > 0
+    ? ' ' + words.slice(verbIdx + 1).join(' ')
+    : '';
+
+  const conjugated     = toThirdPerson(firstVerb);
+  const fixedRemainder = fixCompoundVerbs(fixReviewerBody(remainder, name), name);
+
+  return name + ' ' + prefix + conjugated + fixedRemainder;
 }
