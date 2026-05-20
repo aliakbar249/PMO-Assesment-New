@@ -6,13 +6,13 @@ import {
   getTemplateForEmployee
 } from '../lib/supabase';
 import { RATING_SCALE, NOT_OBSERVED } from '../data/competencies';
-import { adaptStatement } from '../lib/statementTense';
+import { useStatementTransforms } from '../lib/statementAI';
 import { Button, Card, Alert, Badge, ProgressBar, TipBox, PageHeader, Modal } from '../components/UI';
 import { CheckCircle, Save, Send, ChevronLeft, ChevronRight, Briefcase, Info, AlertCircle } from 'lucide-react';
 
 const ALL_RATINGS = [...RATING_SCALE, NOT_OBSERVED];
 
-// ─── Assignment-specific questions ────────────────────────────
+// ─── Assignment-specific questions ───────────────────────────────────────────
 const ASSIGNMENT_QUESTIONS = [
   { id: 'q1', text: 'Demonstrated strong project leadership throughout this assignment' },
   { id: 'q2', text: 'Communicated effectively with stakeholders throughout the assignment' },
@@ -23,8 +23,6 @@ const ASSIGNMENT_QUESTIONS = [
   { id: 'q7', text: 'Adapted effectively to changes and challenges during the assignment' },
   { id: 'q8', text: 'Demonstrated accountability for results and decisions' },
 ];
-
-// withFirstName is replaced by adaptStatement from statementTense.js
 
 export default function ReviewerAssessment({ onNavigate }) {
   const { currentUser, refresh } = useApp();
@@ -159,7 +157,7 @@ export default function ReviewerAssessment({ onNavigate }) {
     setSubmitModal(false);
   };
 
-  // ── Submit click: validate completeness first ─────────────────
+  // Submit click: validate completeness first
   const handleSubmitClick = () => {
     const incomplete = sections
       .filter(s => !sectionDone(s.id))
@@ -336,9 +334,10 @@ export default function ReviewerAssessment({ onNavigate }) {
   );
 }
 
-// ─── Section Panel (third-person wording) ─────────────────────
+// ─── Section Panel (AI-transformed third-person wording) ─────────────────────
 function SectionPanel({ section, employeeFirstName, ratings, onRate, stepNum, totalSteps }) {
   const firstName = employeeFirstName || 'This person';
+  const { texts, loading } = useStatementTransforms(section.statements, 'reviewer', firstName);
 
   return (
     <Card className="mb-4">
@@ -373,11 +372,12 @@ function SectionPanel({ section, employeeFirstName, ratings, onRate, stepNum, to
         </div>
       </div>
 
-      {/* Statements with third-person wording */}
+      {/* Statements with AI-transformed third-person wording */}
       <div className="p-6 space-y-4">
         {section.statements.map((stmt, idx) => {
           const currentRating = ratings[stmt.id];
           const ratingObj = currentRating !== undefined ? ALL_RATINGS.find(r => r.value === currentRating) : null;
+          const stmtText  = texts.get(stmt.id) || stmt.text;
           return (
             <div
               key={stmt.id}
@@ -386,11 +386,11 @@ function SectionPanel({ section, employeeFirstName, ratings, onRate, stepNum, to
               <div className="flex items-start gap-3 mb-3">
                 <span className="text-xs font-bold text-gray-400 w-6 flex-shrink-0 mt-0.5">{idx + 1}.</span>
                 <div className="flex-1">
-                  {/* Third-person with smart tense adapter */}
-                  <p className="text-sm text-gray-800 font-medium leading-snug">
-                    {adaptStatement(stmt.text, 'reviewer', firstName)}
-                  </p>
-                  {stmt.reviewerTip && (
+                  {loading
+                    ? <div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" />
+                    : <p className="text-sm text-gray-800 font-medium leading-snug">{stmtText}</p>
+                  }
+                  {stmt.reviewerTip && !loading && (
                     <p className="text-xs text-blue-600 mt-1 italic">{stmt.reviewerTip}</p>
                   )}
                 </div>
@@ -405,10 +405,11 @@ function SectionPanel({ section, employeeFirstName, ratings, onRate, stepNum, to
                   <button
                     key={r.value}
                     onClick={() => onRate(stmt.id, r.value)}
+                    disabled={loading}
                     className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all
                       ${currentRating === r.value
                         ? `${r.color} text-white border-transparent shadow-md scale-105`
-                        : `bg-white ${r.textColor} ${r.border} hover:scale-105 hover:shadow-sm`}`}
+                        : `bg-white ${r.textColor} ${r.border} hover:scale-105 hover:shadow-sm disabled:opacity-50`}`}
                   >
                     {r.label}
                   </button>
@@ -422,9 +423,16 @@ function SectionPanel({ section, employeeFirstName, ratings, onRate, stepNum, to
   );
 }
 
-// ─── Assignment Ratings Panel ──────────────────────────────────
+// ─── Assignment Ratings Panel (AI-transformed questions) ──────────────────────
 function AssignmentRatingsPanel({ assignments, employeeName, employeeFirstName, ratings, onRate }) {
-  const firstName = employeeFirstName || 'this person';
+  const firstName = employeeFirstName || 'This person';
+
+  // Transform all assignment questions once via AI (cached across re-renders)
+  const { texts: qTexts, loading: qLoading } = useStatementTransforms(
+    ASSIGNMENT_QUESTIONS,
+    'reviewer',
+    firstName
+  );
 
   if (!assignments || assignments.length === 0) {
     return (
@@ -485,8 +493,9 @@ function AssignmentRatingsPanel({ assignments, employeeName, employeeFirstName, 
 
           <div className="p-5 space-y-3">
             {ASSIGNMENT_QUESTIONS.map((q, idx) => {
-              const cur = ratings?.[assign.id]?.[q.id];
+              const cur  = ratings?.[assign.id]?.[q.id];
               const rObj = cur !== undefined ? ALL_RATINGS.find(r => r.value === cur) : null;
+              const qText = qTexts.get(q.id) || q.text;
               return (
                 <div
                   key={q.id}
@@ -495,7 +504,10 @@ function AssignmentRatingsPanel({ assignments, employeeName, employeeFirstName, 
                   <div className="flex items-start gap-2 mb-2">
                     <span className="text-xs font-bold text-gray-400 w-5 flex-shrink-0">{idx + 1}.</span>
                     <div className="flex-1">
-                      <p className="text-xs text-gray-700 font-medium">{adaptStatement(q.text, 'reviewer', firstName)}</p>
+                      {qLoading
+                        ? <div className="h-3.5 bg-gray-200 rounded animate-pulse w-3/4" />
+                        : <p className="text-xs text-gray-700 font-medium">{qText}</p>
+                      }
                     </div>
                     {rObj && (
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${rObj.bg} ${rObj.textColor} border ${rObj.border}`}>
@@ -508,10 +520,11 @@ function AssignmentRatingsPanel({ assignments, employeeName, employeeFirstName, 
                       <button
                         key={r.value}
                         onClick={() => onRate(assign.id, q.id, r.value)}
+                        disabled={qLoading}
                         className={`px-2.5 py-1 rounded-lg text-xs font-medium border-2 transition-all
                           ${cur === r.value
                             ? `${r.color} text-white border-transparent shadow-sm scale-105`
-                            : `bg-white ${r.textColor} ${r.border} hover:scale-105`}`}
+                            : `bg-white ${r.textColor} ${r.border} hover:scale-105 disabled:opacity-50`}`}
                       >
                         {r.label}
                       </button>

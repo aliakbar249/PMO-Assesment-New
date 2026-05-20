@@ -4,7 +4,7 @@ import {
   getEmployeeByUserId, getAssessment, saveAssessmentProgress,
   submitSelfAssessment, getTemplateForEmployee
 } from '../lib/supabase';
-import { adaptStatement } from '../lib/statementTense';
+import { useStatementTransforms } from '../lib/statementAI';
 import { RATING_SCALE } from '../data/competencies';
 import { Button, Card, Alert, ProgressBar, Badge, TipBox, PageHeader, Modal } from '../components/UI';
 import { CheckCircle, Save, Send, ChevronRight, ChevronLeft } from 'lucide-react';
@@ -167,21 +167,13 @@ export default function SelfAssessment({ onNavigate }) {
             </div>
           </div>
 
-          {/* Statements */}
-          <div className="p-6 space-y-4">
-            {section.statements.map((stmt, idx) => {
-              const currentRating = localRatings[section.id]?.[stmt.id];
-              return (
-                <StatementRow
-                  key={stmt.id}
-                  index={idx + 1}
-                  statement={stmt}
-                  currentRating={currentRating}
-                  onRate={(val) => handleRate(stmt.id, val)}
-                  isSelf={true}
-                />
-              );
-            })}
+          {/* Statements — AI-transformed block */}
+          <div className="p-6">
+            <SelfSectionStatements
+              section={section}
+              localRatings={localRatings}
+              onRate={handleRate}
+            />
           </div>
         </Card>
       )}
@@ -220,46 +212,56 @@ export default function SelfAssessment({ onNavigate }) {
   );
 }
 
-// ─── Statement Row Component ──────────────────────────────────
-function StatementRow({ index, statement, currentRating, onRate, isSelf }) {
-  const scale = isSelf
-    ? RATING_SCALE
-    : [...RATING_SCALE, { value: 0, label: 'Not Observed / Unable to Rate', short: 'N/O', bg: 'bg-gray-50', textColor: 'text-gray-500', border: 'border-gray-300', color: 'bg-gray-300' }];
-  const rated = currentRating !== undefined;
-  const ratingObj = rated ? scale.find(r => r.value === currentRating) : null;
-
-  // Build statement text based on perspective using smart tense adapter
-  const statementText = adaptStatement(statement.text, isSelf ? 'self' : 'reviewer', '');
+// ─── Self Section Statements (AI-transformed) ────────────────────────────────
+// Isolated component so the useStatementTransforms hook is always called at
+// the top-level of a component (Rules of Hooks).
+function SelfSectionStatements({ section, localRatings, onRate }) {
+  const { texts, loading } = useStatementTransforms(section.statements, 'self', '');
 
   return (
-    <div className={`p-4 rounded-xl border transition-all ${rated ? 'border-indigo-100 bg-indigo-50/40' : 'border-gray-200 bg-white'}`}>
-      <div className="flex items-start gap-3 mb-3">
-        <span className="text-xs font-bold text-gray-400 w-6 flex-shrink-0 mt-0.5">{index}.</span>
-        <div className="flex-1">
-          <p className="text-sm text-gray-800 font-medium leading-snug">{statementText}</p>
-          {statement.selfTip && isSelf && (
-            <p className="text-xs text-indigo-600 mt-1 italic">{statement.selfTip}</p>
-          )}
-        </div>
-        {ratingObj && (
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${ratingObj.bg} ${ratingObj.textColor} border ${ratingObj.border}`}>
-            {ratingObj.label}
-          </span>
-        )}
-      </div>
-      <div className="flex gap-2 flex-wrap pl-9">
-        {scale.map(r => (
-          <button key={r.value} onClick={() => onRate(r.value)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all
-              ${currentRating === r.value
-                ? `${r.color} text-white border-transparent shadow-md scale-105`
-                : `bg-white ${r.textColor} ${r.border} hover:scale-105 hover:shadow-sm`}`}>
-            {r.label}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-4">
+      {section.statements.map((stmt, idx) => {
+        const currentRating = localRatings[section.id]?.[stmt.id];
+        const rated      = currentRating !== undefined;
+        const ratingObj  = rated ? RATING_SCALE.find(r => r.value === currentRating) : null;
+        const stmtText   = loading
+          ? null
+          : (texts.get(stmt.id) || stmt.text);
+
+        return (
+          <div key={stmt.id} className={`p-4 rounded-xl border transition-all ${rated ? 'border-indigo-100 bg-indigo-50/40' : 'border-gray-200 bg-white'}`}>
+            <div className="flex items-start gap-3 mb-3">
+              <span className="text-xs font-bold text-gray-400 w-6 flex-shrink-0 mt-0.5">{idx + 1}.</span>
+              <div className="flex-1">
+                {loading
+                  ? <div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" />
+                  : <p className="text-sm text-gray-800 font-medium leading-snug">{stmtText}</p>
+                }
+                {stmt.selfTip && !loading && (
+                  <p className="text-xs text-indigo-600 mt-1 italic">{stmt.selfTip}</p>
+                )}
+              </div>
+              {ratingObj && (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${ratingObj.bg} ${ratingObj.textColor} border ${ratingObj.border}`}>
+                  {ratingObj.label}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2 flex-wrap pl-9">
+              {RATING_SCALE.map(r => (
+                <button key={r.value} onClick={() => onRate(stmt.id, r.value)}
+                  disabled={loading}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all
+                    ${currentRating === r.value
+                      ? `${r.color} text-white border-transparent shadow-md scale-105`
+                      : `bg-white ${r.textColor} ${r.border} hover:scale-105 hover:shadow-sm disabled:opacity-50`}`}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
-
-export { StatementRow };
