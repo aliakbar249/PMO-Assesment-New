@@ -4,7 +4,7 @@ import {
   getEmployeeByUserId, getAssessment, saveAssessmentProgress,
   submitSelfAssessment, getTemplateForEmployee
 } from '../lib/supabase';
-import { useStatementTransforms } from '../lib/statementAI';
+import { adaptStatement } from '../lib/statementTense';
 import { RATING_SCALE } from '../data/competencies';
 import { Button, Card, Alert, ProgressBar, Badge, TipBox, PageHeader, Modal } from '../components/UI';
 import { CheckCircle, Save, Send, ChevronRight, ChevronLeft } from 'lucide-react';
@@ -216,28 +216,22 @@ export default function SelfAssessment({ onNavigate }) {
 // Isolated component so the useStatementTransforms hook is always called at
 // the top-level of a component (Rules of Hooks).
 function SelfSectionStatements({ section, localRatings, onRate }) {
-  const { texts, loading } = useStatementTransforms(section.statements, 'self', '');
-
   return (
     <div className="space-y-4">
       {section.statements.map((stmt, idx) => {
         const currentRating = localRatings[section.id]?.[stmt.id];
-        const rated      = currentRating !== undefined;
-        const ratingObj  = rated ? RATING_SCALE.find(r => r.value === currentRating) : null;
-        const stmtText   = loading
-          ? null
-          : (texts.get(stmt.id) || stmt.text);
+        const rated     = currentRating !== undefined;
+        const ratingObj = rated ? RATING_SCALE.find(r => r.value === currentRating) : null;
+        // Adapt statement synchronously — no cache, no async, always correct
+        const stmtText  = adaptStatement(stmt.text, 'self', '');
 
         return (
           <div key={stmt.id} className={`p-4 rounded-xl border transition-all ${rated ? 'border-indigo-100 bg-indigo-50/40' : 'border-gray-200 bg-white'}`}>
             <div className="flex items-start gap-3 mb-3">
               <span className="text-xs font-bold text-gray-400 w-6 flex-shrink-0 mt-0.5">{idx + 1}.</span>
               <div className="flex-1">
-                {loading
-                  ? <div className="h-4 bg-gray-200 rounded animate-pulse w-3/4" />
-                  : <p className="text-sm text-gray-800 font-medium leading-snug">{stmtText}</p>
-                }
-                {stmt.selfTip && !loading && (
+                <p className="text-sm text-gray-800 font-medium leading-snug">{stmtText}</p>
+                {stmt.selfTip && (
                   <p className="text-xs text-indigo-600 mt-1 italic">{stmt.selfTip}</p>
                 )}
               </div>
@@ -250,11 +244,10 @@ function SelfSectionStatements({ section, localRatings, onRate }) {
             <div className="flex gap-2 flex-wrap pl-9">
               {RATING_SCALE.map(r => (
                 <button key={r.value} onClick={() => onRate(stmt.id, r.value)}
-                  disabled={loading}
                   className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all
                     ${currentRating === r.value
                       ? `${r.color} text-white border-transparent shadow-md scale-105`
-                      : `bg-white ${r.textColor} ${r.border} hover:scale-105 hover:shadow-sm disabled:opacity-50`}`}>
+                      : `bg-white ${r.textColor} ${r.border} hover:scale-105 hover:shadow-sm`}`}>
                   {r.label}
                 </button>
               ))}
