@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../store/AppContext';
 import {
-  getReviewerByUserId, getEmployeeById, getAssignmentsByEmployee,
+  getReviewerByUserId, getReviewersByUserId, getEmployeeById, getAssignmentsByEmployee,
   getReview, saveReviewProgress, saveAssignmentReview, submitReview,
   getTemplateForEmployee
 } from '../lib/supabase';
@@ -24,7 +24,7 @@ const ASSIGNMENT_QUESTIONS = [
   { id: 'q8', text: 'Demonstrated accountability for results and decisions' },
 ];
 
-export default function ReviewerAssessment({ onNavigate }) {
+export default function ReviewerAssessment({ onNavigate, reviewerRowId }) {
   const { currentUser, refresh } = useApp();
   const [reviewer,    setReviewer]    = useState(null);
   const [employee,    setEmployee]    = useState(null);
@@ -46,7 +46,14 @@ export default function ReviewerAssessment({ onNavigate }) {
   useEffect(() => {
     if (!currentUser) return;
     setLoading(true);
-    getReviewerByUserId(currentUser.id).then(async rev => {
+
+    // If a specific reviewer row was selected from the dashboard, find it;
+    // otherwise fall back to the first row (backwards-compatible for single-assignment reviewers)
+    const getReviewer = reviewerRowId
+      ? getReviewersByUserId(currentUser.id).then(rows => rows.find(r => r.id === reviewerRowId) || rows[0] || null)
+      : getReviewerByUserId(currentUser.id);
+
+    getReviewer.then(async rev => {
       setReviewer(rev);
       revRef.current = rev;
       if (rev?.employeeId) {
@@ -71,7 +78,7 @@ export default function ReviewerAssessment({ onNavigate }) {
       }
       setLoading(false);
     });
-  }, [currentUser?.id]);
+  }, [currentUser?.id, reviewerRowId]);
 
   if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading assessment…</div>;
   if (!reviewer || !employee) return <Alert type="warning">No employee linked to your reviewer account. Please contact the administrator.</Alert>;
@@ -191,6 +198,14 @@ export default function ReviewerAssessment({ onNavigate }) {
 
   return (
     <div>
+      {/* Back link — shown when reviewer has multiple employees */}
+      <button
+        onClick={() => onNavigate('rev-dashboard')}
+        className="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 mb-3 -mt-1"
+      >
+        <ChevronLeft size={15} />Back to all employees
+      </button>
+
       <PageHeader
         title={`Rating: ${employee.name}`}
         subtitle={`${employee.jobTitle || ''}${employee.organization ? ' · ' + employee.organization : ''}`}

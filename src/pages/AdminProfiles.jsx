@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   getAllReviewers, approveReviewer, rejectReviewer, updateReviewer,
-  setReviewerStatus, getAllEmployees, getAssignmentsByEmployee,
+  setReviewerStatus, getAllEmployees,
   adminCreateReviewer, adminResetPassword, adminSetPassword,
   getUserByNominationId
 } from '../lib/supabase';
@@ -23,12 +23,12 @@ const CATEGORIES = ['sponsor', 'supervisor', 'peer', 'client', 'teamMember'];
 // ─── Create Reviewer Modal ─────────────────────────────────────
 function CreateReviewerModal({ onSave, onClose }) {
   const [employees,    setEmployees]    = useState([]);
-  const [assignments,  setAssignments]  = useState([]);
   const [loadingEmps,  setLoadingEmps]  = useState(true);
+  const [empSearch,    setEmpSearch]    = useState('');
+  const [selectedIds,  setSelectedIds]  = useState([]);
   const [form, setForm] = useState({
     name: '', email: '', designation: '', department: '',
     phone: '', role: '', category: 'peer',
-    employeeId: '', assignmentId: '',
   });
   const [errors, setErrors]   = useState({});
   const [saving, setSaving]   = useState(false);
@@ -42,13 +42,29 @@ function CreateReviewerModal({ onSave, onClose }) {
     });
   }, []);
 
-  // Load assignments when employee selected
-  useEffect(() => {
-    if (!form.employeeId) { setAssignments([]); return; }
-    getAssignmentsByEmployee(form.employeeId).then(a => setAssignments(a || []));
-  }, [form.employeeId]);
-
   const set = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setErrors(er => ({ ...er, [k]: '' })); };
+
+  const toggleEmployee = (id) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+    setErrors(er => ({ ...er, employeeIds: '' }));
+  };
+
+  const selectAll = () => {
+    const visibleIds = filteredEmployees.map(e => e.id);
+    const allSelected = visibleIds.every(id => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedIds(prev => [...new Set([...prev, ...visibleIds])]);
+    }
+  };
+
+  const filteredEmployees = employees.filter(e => {
+    const q = empSearch.toLowerCase();
+    return !q || e.name?.toLowerCase().includes(q) || e.jobTitle?.toLowerCase().includes(q) || e.department?.toLowerCase().includes(q);
+  });
 
   const validate = () => {
     const e = {};
@@ -56,7 +72,7 @@ function CreateReviewerModal({ onSave, onClose }) {
     if (!form.email.trim())       e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
     if (!form.designation.trim()) e.designation = 'Designation is required';
-    if (!form.employeeId)         e.employeeId = 'Select an employee being reviewed';
+    if (selectedIds.length === 0) e.employeeIds = 'Select at least one employee';
     return e;
   };
 
@@ -64,13 +80,10 @@ function CreateReviewerModal({ onSave, onClose }) {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
     setSaving(true);
-    const res = await adminCreateReviewer({
-      ...form,
-      assignmentId: form.assignmentId || null,
-    });
+    const res = await adminCreateReviewer({ ...form, employeeIds: selectedIds });
     setSaving(false);
     if (!res.success) { setErrors({ general: res.error }); return; }
-    setResult(res);
+    setResult({ ...res, selectedEmployees: employees.filter(e => selectedIds.includes(e.id)) });
     onSave();
   };
 
@@ -83,10 +96,28 @@ function CreateReviewerModal({ onSave, onClose }) {
           <div className="font-semibold flex gap-2">
             <CheckCircle size={15} />
             {result.isExistingUser
-              ? 'Reviewer linked to existing account & approved!'
-              : 'Reviewer account created & approved!'}
+              ? `Reviewer linked to existing account — assigned to ${result.assignedCount} employee${result.assignedCount !== 1 ? 's' : ''}!`
+              : `Reviewer account created — assigned to ${result.assignedCount} employee${result.assignedCount !== 1 ? 's' : ''}!`}
           </div>
         </Alert>
+
+        {/* Assigned employees summary */}
+        <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl">
+          <p className="text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1.5"><Users size={13} />Assigned to:</p>
+          <ul className="space-y-1">
+            {result.selectedEmployees.map(emp => (
+              <li key={emp.id} className="flex items-center gap-2 text-xs text-indigo-900">
+                <CheckCircle size={12} className="text-indigo-500 shrink-0" />
+                <span className="font-medium">{emp.name}</span>
+                {emp.jobTitle && <span className="text-indigo-500">— {emp.jobTitle}</span>}
+              </li>
+            ))}
+          </ul>
+          {result.failedCount > 0 && (
+            <p className="mt-2 text-xs text-amber-700">⚠ {result.failedCount} assignment{result.failedCount !== 1 ? 's' : ''} failed — please retry for those employees.</p>
+          )}
+        </div>
+
         <div className="p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl space-y-2">
           <p className="text-sm font-semibold text-amber-800 flex items-center gap-2"><KeyRound size={14} />Login Credentials</p>
           <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-amber-200 text-sm">
@@ -102,7 +133,7 @@ function CreateReviewerModal({ onSave, onClose }) {
             </button>
           </div>
           {result.isExistingUser
-            ? <p className="text-xs text-blue-700">ℹ This person already has a reviewer account — a new review assignment was added for them.</p>
+            ? <p className="text-xs text-blue-700">ℹ This person already has a reviewer account — new assignments were added for each selected employee.</p>
             : <p className="text-xs text-amber-700">⚠ Share with the reviewer. They must change the password on first login.</p>
           }
         </div>
@@ -111,44 +142,90 @@ function CreateReviewerModal({ onSave, onClose }) {
     );
   }
 
+  const visibleAllSelected = filteredEmployees.length > 0 && filteredEmployees.every(e => selectedIds.includes(e.id));
+
   return (
     <div className="space-y-3">
       {errors.general && <Alert type="error"><div className="flex gap-2"><AlertCircle size={14} />{errors.general}</div></Alert>}
 
-      {/* Employee & Category */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2">
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
-            Employee Being Reviewed <span className="text-red-500">*</span>
+      {/* Multi-employee picker */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="block text-sm font-medium text-gray-700">
+            Employees Being Reviewed <span className="text-red-500">*</span>
+            {selectedIds.length > 0 && (
+              <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full font-semibold">
+                {selectedIds.length} selected
+              </span>
+            )}
           </label>
-          <select value={form.employeeId} onChange={set('employeeId')}
-            className={`w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 bg-white ${errors.employeeId ? 'border-red-400' : 'border-gray-300'}`}>
-            <option value="">Select employee…</option>
-            {employees.map(e => <option key={e.id} value={e.id}>{e.name} — {e.jobTitle}</option>)}
-          </select>
-          {errors.employeeId && <p className="mt-1 text-xs text-red-600">{errors.employeeId}</p>}
+          {filteredEmployees.length > 0 && (
+            <button type="button" onClick={selectAll}
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+              {visibleAllSelected ? 'Deselect all' : 'Select all'}
+            </button>
+          )}
         </div>
 
-        {form.employeeId && (
-          <div className="col-span-2">
-            <Select label="Linked Assignment (optional)" value={form.assignmentId} onChange={set('assignmentId')}>
-              <option value="">No specific assignment</option>
-              {assignments.map(a => <option key={a.id} value={a.id}>{a.title} · {a.role}</option>)}
-            </Select>
-          </div>
-        )}
+        {/* Search box */}
+        <div className="relative mb-2">
+          <input
+            type="text"
+            placeholder="Search employees…"
+            value={empSearch}
+            onChange={e => setEmpSearch(e.target.value)}
+            className="w-full px-3.5 py-2 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
+          />
+          {empSearch && (
+            <button onClick={() => setEmpSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <X size={14} />
+            </button>
+          )}
+        </div>
 
-        <div className="col-span-2">
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">Reviewer Category <span className="text-red-500">*</span></label>
-          <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map(cat => (
-              <button key={cat} type="button" onClick={() => setForm(f => ({ ...f, category: cat }))}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all
-                  ${form.category === cat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-300'}`}>
-                {CATEGORY_LABELS[cat]}
-              </button>
-            ))}
-          </div>
+        {/* Scrollable checklist */}
+        <div className={`border rounded-xl overflow-y-auto max-h-44 bg-white ${errors.employeeIds ? 'border-red-400' : 'border-gray-300'}`}>
+          {loadingEmps ? (
+            <p className="text-center py-6 text-sm text-gray-400">Loading employees…</p>
+          ) : filteredEmployees.length === 0 ? (
+            <p className="text-center py-6 text-sm text-gray-400">No employees found</p>
+          ) : (
+            filteredEmployees.map((emp, idx) => {
+              const checked = selectedIds.includes(emp.id);
+              return (
+                <label key={emp.id}
+                  className={`flex items-center gap-3 px-3.5 py-2.5 cursor-pointer transition-colors
+                    ${checked ? 'bg-indigo-50' : 'hover:bg-gray-50'}
+                    ${idx !== filteredEmployees.length - 1 ? 'border-b border-gray-100' : ''}`}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleEmployee(emp.id)}
+                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{emp.name}</p>
+                    {(emp.jobTitle || emp.department) && (
+                      <p className="text-xs text-gray-500 truncate">
+                        {[emp.jobTitle, emp.department].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
+                  </div>
+                </label>
+              );
+            })
+          )}
+        </div>
+        {errors.employeeIds && <p className="mt-1 text-xs text-red-600">{errors.employeeIds}</p>}
+      </div>
+
+      {/* Reviewer Category */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1.5">Reviewer Category <span className="text-red-500">*</span></label>
+        <div className="flex flex-wrap gap-2">
+          {CATEGORIES.map(cat => (
+            <button key={cat} type="button" onClick={() => setForm(f => ({ ...f, category: cat }))}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border-2 transition-all
+                ${form.category === cat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-300'}`}>
+              {CATEGORY_LABELS[cat]}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -163,13 +240,13 @@ function CreateReviewerModal({ onSave, onClose }) {
       </div>
 
       <Alert type="info" className="mt-1">
-        Reviewer will be auto-approved. A temporary password is generated — share it with the reviewer.
+        Reviewer will be auto-approved and assigned to all selected employees. A temporary password is generated — share it with the reviewer.
       </Alert>
 
       <div className="flex gap-3 justify-end pt-1">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button onClick={handleSave} disabled={saving || loadingEmps}>
-          <Plus size={14} />{saving ? 'Creating…' : 'Create Reviewer'}
+          <Plus size={14} />{saving ? 'Creating…' : `Create Reviewer${selectedIds.length > 1 ? ` & Assign (${selectedIds.length})` : ''}`}
         </Button>
       </div>
     </div>

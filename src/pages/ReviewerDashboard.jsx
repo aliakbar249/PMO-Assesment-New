@@ -1,113 +1,149 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
-import { getReviewerByUserId, getReviewsForEmployee, getEmployeeById, getAssignmentsByEmployee, getTemplateForEmployee } from '../lib/supabase';
+import { getReviewersByUserId, getReviewsForEmployee, getEmployeeById, getAssignmentsByEmployee, getTemplateForEmployee } from '../lib/supabase';
 import { StatCard, Card, Badge, Button, ProgressBar, Alert, PageHeader } from '../components/UI';
-import { ClipboardList, CheckCircle, Clock } from 'lucide-react';
+import { ClipboardList, CheckCircle, Clock, ChevronRight, Users } from 'lucide-react';
 
-export default function ReviewerDashboard({ onNavigate }) {
-  const { currentUser, tick } = useApp();
-  const [reviewer,       setReviewer]       = useState(null);
-  const [employee,       setEmployee]       = useState(null);
-  const [myReview,       setMyReview]       = useState(null);
-  const [assignments,    setAssignments]    = useState([]);
+// ─── Single employee card in the list ────────────────────────────
+function EmployeeReviewCard({ reviewer, onStart }) {
+  const [employee,    setEmployee]    = useState(null);
+  const [myReview,    setMyReview]    = useState(null);
+  const [assignments, setAssignments] = useState([]);
   const [templateSections, setTemplateSections] = useState([]);
-  const [loading,        setLoading]        = useState(true);
+  const [loading,     setLoading]     = useState(true);
 
   useEffect(() => {
-    if (!currentUser) return;
-    setLoading(true);
-    getReviewerByUserId(currentUser.id).then(async rev => {
-      setReviewer(rev);
-      if (rev?.employeeId) {
-        const [emp, reviews, asgns, tmplSections] = await Promise.all([
-          getEmployeeById(rev.employeeId),
-          getReviewsForEmployee(rev.employeeId),
-          getAssignmentsByEmployee(rev.employeeId),
-          getTemplateForEmployee({ id: rev.employeeId }),
-        ]);
-        setEmployee(emp);
-        setAssignments(asgns || []);
-        setTemplateSections(tmplSections || []);
-        const mine = reviews.find(r => r.reviewerId === rev.id);
-        setMyReview(mine || null);
-      }
+    if (!reviewer?.employeeId) { setLoading(false); return; }
+    Promise.all([
+      getEmployeeById(reviewer.employeeId),
+      getReviewsForEmployee(reviewer.employeeId),
+      getAssignmentsByEmployee(reviewer.employeeId),
+      getTemplateForEmployee({ id: reviewer.employeeId }),
+    ]).then(([emp, reviews, asgns, tmplSections]) => {
+      setEmployee(emp);
+      setAssignments(asgns || []);
+      setTemplateSections(tmplSections || []);
+      const mine = reviews.find(r => r.reviewerId === reviewer.id);
+      setMyReview(mine || null);
       setLoading(false);
     });
-  }, [currentUser?.id, tick]);
+  }, [reviewer?.employeeId, reviewer?.id]);
 
-  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading dashboard…</div>;
-
-  if (!reviewer || !employee) {
-    return <Alert type="warning">No employee linked to your reviewer account. Please contact the administrator.</Alert>;
+  if (loading) {
+    return (
+      <Card className="p-4 animate-pulse">
+        <div className="h-4 bg-gray-200 rounded w-1/2 mb-2" />
+        <div className="h-3 bg-gray-100 rounded w-1/3" />
+      </Card>
+    );
   }
+
+  if (!employee) return null;
 
   const isSubmitted = myReview?.status === 'submitted';
   const inProgress  = myReview?.status === 'in_progress';
 
-  // Use actual template section count, not hardcoded 4
   const numSections   = templateSections.length || 0;
-  // +1 for assignment ratings step only if employee has assignments
   const totalSections = numSections + (assignments.length > 0 ? 1 : 0);
+  const savedSections = Math.min(Object.keys(myReview?.sections || {}).length, numSections);
+  const assignDone    = Object.keys(myReview?.assignmentRatings || {}).length > 0 ? 1 : 0;
+  const doneSections  = savedSections + (assignments.length > 0 ? assignDone : 0);
 
-  // Count only competency sections that were actually saved (cap at numSections)
-  const savedSectionCount = Math.min(
-    Object.keys(myReview?.sections || {}).length,
-    numSections
+  return (
+    <Card className={`p-4 transition-all ${isSubmitted ? 'border-emerald-200 bg-emerald-50/30' : 'hover:shadow-md'}`}>
+      <div className="flex items-center gap-4">
+        {/* Avatar */}
+        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-400 to-indigo-700 flex items-center justify-center shrink-0">
+          <span className="text-white text-base font-bold">{employee.name?.[0]?.toUpperCase()}</span>
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-gray-800 truncate">{employee.name}</p>
+            <Badge variant={isSubmitted ? 'success' : inProgress ? 'warning' : 'default'}>
+              {isSubmitted ? 'Submitted' : inProgress ? 'In Progress' : 'Not Started'}
+            </Badge>
+            <Badge variant="info">{reviewer.category}</Badge>
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5 truncate">{employee.jobTitle}{employee.department ? ` · ${employee.department}` : ''}</p>
+          {totalSections > 0 && !isSubmitted && (
+            <div className="mt-2">
+              <ProgressBar value={doneSections} max={totalSections} label={`${doneSections}/${totalSections} sections`} />
+            </div>
+          )}
+        </div>
+
+        {/* Action */}
+        <div className="shrink-0">
+          {isSubmitted ? (
+            <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+              <CheckCircle size={18} className="text-emerald-600" />
+            </div>
+          ) : (
+            <Button onClick={() => onStart(reviewer)} className="flex items-center gap-1 text-sm px-3 py-2">
+              {inProgress ? 'Continue' : 'Start'}
+              <ChevronRight size={14} />
+            </Button>
+          )}
+        </div>
+      </div>
+    </Card>
   );
-  // Assignment ratings count as 1 if any rating was saved
-  const assignmentDone = Object.keys(myReview?.assignmentRatings || {}).length > 0 ? 1 : 0;
-  const doneSections   = savedSectionCount + (assignments.length > 0 ? assignmentDone : 0);
+}
+
+// ─── Main dashboard ───────────────────────────────────────────────
+export default function ReviewerDashboard({ onNavigate, onSelectReviewer }) {
+  const { currentUser, tick } = useApp();
+  const [reviewers, setReviewers] = useState([]);
+  const [loading,   setLoading]   = useState(true);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setLoading(true);
+    getReviewersByUserId(currentUser.id).then(rows => {
+      setReviewers(rows || []);
+      setLoading(false);
+    });
+  }, [currentUser?.id, tick]);
+
+  const handleStart = (reviewer) => {
+    onSelectReviewer(reviewer.id);   // tell App which reviewer row to use
+    onNavigate('rev-assessment');
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading dashboard…</div>;
+
+  if (reviewers.length === 0) {
+    return (
+      <>
+        <PageHeader title="Reviewer Dashboard" subtitle="You have been invited to provide 360° assessments." />
+        <Alert type="warning">No employee linked to your reviewer account. Please contact the administrator.</Alert>
+      </>
+    );
+  }
+
+  const submittedCount  = reviewers.filter(r => r._submitted).length; // approximate; card handles per-row
 
   return (
     <div>
-      <PageHeader title="Reviewer Dashboard" subtitle="You have been invited to provide a 360° assessment." />
+      <PageHeader
+        title="Reviewer Dashboard"
+        subtitle={`You are assigned to review ${reviewers.length} employee${reviewers.length !== 1 ? 's' : ''}.`}
+      />
 
-      <Card className="p-5 mb-5">
-        <div className="flex items-start gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-400 to-indigo-700 flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-xl font-bold">{employee.name?.[0]?.toUpperCase()}</span>
-          </div>
-          <div className="flex-1">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-base font-bold text-gray-800">{employee.name}</h2>
-                <p className="text-sm text-gray-500">{employee.jobTitle} · {employee.department}</p>
-                <p className="text-xs text-gray-400 mt-1">{employee.organization}</p>
-              </div>
-              <div>
-                <Badge variant="info">{reviewer.category}</Badge>
-                <p className="text-xs text-gray-400 mt-1">{reviewer.role}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Card>
-
+      {/* Summary bar */}
       <div className="grid grid-cols-2 gap-4 mb-5">
-        <StatCard label="Sections Completed" value={`${doneSections}/${totalSections}`} icon={ClipboardList} color="indigo" />
-        <StatCard label="Status" value={isSubmitted ? 'Submitted' : inProgress ? 'In Progress' : 'Not Started'} icon={isSubmitted ? CheckCircle : Clock} color={isSubmitted ? 'green' : 'amber'} />
+        <StatCard label="Assigned Employees" value={reviewers.length} icon={Users}         color="indigo" />
+        <StatCard label="Awaiting Review"     value={reviewers.length} icon={ClipboardList} color="amber"  />
       </div>
 
-      {isSubmitted ? (
-        <div className="text-center py-10">
-          <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
-            <CheckCircle size={32} className="text-emerald-600" />
-          </div>
-          <h3 className="text-base font-bold text-gray-800 mb-1">Assessment Submitted!</h3>
-          <p className="text-sm text-gray-500">Thank you for completing the 360° assessment for <strong>{employee.name}</strong>.</p>
-        </div>
-      ) : (
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">Your Assessment Progress</h3>
-          <ProgressBar value={doneSections} max={totalSections} label="Sections done" className="mb-4" />
-          <p className="text-sm text-gray-600 mb-4">
-            You will rate <strong>{employee.name}</strong> on 4 Power Skills sections and their {assignments.length} assignment(s). All ratings use the <em>Always / Often / Sometimes / Seldom / Never</em> scale.
-          </p>
-          <Button onClick={() => onNavigate('rev-assessment')}>
-            {inProgress ? 'Continue Assessment →' : 'Start Assessment →'}
-          </Button>
-        </Card>
-      )}
+      {/* Employee list */}
+      <div className="space-y-3">
+        {reviewers.map(rev => (
+          <EmployeeReviewCard key={rev.id} reviewer={rev} onStart={handleStart} />
+        ))}
+      </div>
     </div>
   );
 }

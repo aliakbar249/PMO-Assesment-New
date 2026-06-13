@@ -24,6 +24,7 @@ import AdminProgress from './pages/AdminProgress';
 import AdminTemplates from './pages/AdminTemplates';
 import AdminExport from './pages/AdminExport';
 import AdminEmployees from './pages/AdminEmployees';
+import AdminCompanies from './pages/AdminCompanies';
 
 // Company Admin pages
 import CompanyDashboard from './pages/CompanyDashboard';
@@ -53,6 +54,7 @@ function AppRouter() {
 
   const defaultPage = currentUser ? DEFAULT_PAGE[currentUser.role] || 'emp-dashboard' : null;
   const [page, setPage] = useState(defaultPage);
+  const [selectedReviewerRowId, setSelectedReviewerRowId] = useState(null);
 
   // When user logs in, set their default page
   const navigate = (p) => setPage(p);
@@ -87,8 +89,18 @@ function AppRouter() {
   if (currentUser.role === 'reviewer') {
     return (
       <Layout page={page} onNavigate={navigate}>
-        {page === 'rev-dashboard'   && <ReviewerDashboard onNavigate={navigate} />}
-        {page === 'rev-assessment'  && <ReviewerAssessment onNavigate={navigate} />}
+        {page === 'rev-dashboard'   && (
+          <ReviewerDashboard
+            onNavigate={navigate}
+            onSelectReviewer={setSelectedReviewerRowId}
+          />
+        )}
+        {page === 'rev-assessment'  && (
+          <ReviewerAssessment
+            onNavigate={navigate}
+            reviewerRowId={selectedReviewerRowId}
+          />
+        )}
       </Layout>
     );
   }
@@ -98,6 +110,7 @@ function AppRouter() {
     return (
       <Layout page={page} onNavigate={navigate}>
         {page === 'adm-dashboard' && <AdminDashboard onNavigate={navigate} />}
+        {page === 'adm-companies' && <AdminCompanies />}
         {page === 'adm-employees' && <AdminEmployees />}
         {page === 'adm-profiles'  && <AdminProfiles />}
         {page === 'adm-progress'  && <AdminProgress />}

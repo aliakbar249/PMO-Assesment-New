@@ -97,6 +97,71 @@ export async function initDb() {
   }
 }
 
+// ─── Companies CRUD ────────────────────────────────────────────
+export async function getCompanies() {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('*')
+    .order('name', { ascending: true });
+  if (error) return [];   // table may not exist yet — return empty list gracefully
+  return (data || []).map(c => ({
+    id: c.id,
+    name: c.name,
+    industry: c.industry || '',
+    contactName: c.contact_name || '',
+    contactEmail: c.contact_email || '',
+    contactPhone: c.contact_phone || '',
+    address: c.address || '',
+    notes: c.notes || '',
+    active: c.active !== false,
+    createdAt: c.created_at,
+  }));
+}
+
+export async function createCompany(data) {
+  const { data: existing } = await supabase
+    .from('companies')
+    .select('id')
+    .ilike('name', data.name.trim())
+    .maybeSingle();
+  if (existing) return { success: false, error: 'A company with this name already exists.' };
+
+  const { error } = await supabase.from('companies').insert({
+    id: genId(),
+    name: data.name.trim(),
+    industry: data.industry || null,
+    contact_name: data.contactName || null,
+    contact_email: data.contactEmail || null,
+    contact_phone: data.contactPhone || null,
+    address: data.address || null,
+    notes: data.notes || null,
+    active: true,
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function updateCompany(id, data) {
+  const updates = { updated_at: nowIso() };
+  if (data.name         !== undefined) updates.name          = data.name.trim();
+  if (data.industry     !== undefined) updates.industry      = data.industry;
+  if (data.contactName  !== undefined) updates.contact_name  = data.contactName;
+  if (data.contactEmail !== undefined) updates.contact_email = data.contactEmail;
+  if (data.contactPhone !== undefined) updates.contact_phone = data.contactPhone;
+  if (data.address      !== undefined) updates.address       = data.address;
+  if (data.notes        !== undefined) updates.notes         = data.notes;
+  if (data.active       !== undefined) updates.active        = data.active;
+  const { error } = await supabase.from('companies').update(updates).eq('id', id);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function deleteCompany(id) {
+  const { error } = await supabase.from('companies').delete().eq('id', id);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
 // ─── Auth ──────────────────────────────────────────────────────
 // ─── Helper: promote 'admin' users that have a linked employees row ──────────
 // The live DB check constraint only allows role IN ('admin','employee','reviewer').
@@ -338,6 +403,43 @@ export async function getCompanyProgressSummary(organization) {
   });
 }
 
+// ─── Admin: Create Super Admin user ───────────────────────────
+export async function adminCreateSuperAdmin(profile) {
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .ilike('email', profile.email.trim())
+    .maybeSingle();
+  if (existing) return { success: false, error: 'Email already registered.' };
+
+  const userId  = genId();
+  const tempPass = (profile.name || 'admin').split(' ')[0].toLowerCase() + '@admin360';
+
+  const { error } = await supabase.from('users').insert({
+    id: userId,
+    role: 'admin',
+    email: profile.email.trim(),
+    password: tempPass,
+    name: profile.name,
+  });
+  if (error) return { success: false, error: error.message };
+
+  // Store org info in employees table (same pattern as company_admin)
+  if (profile.organization) {
+    await supabase.from('employees').insert({
+      id: genId(),
+      user_id: userId,
+      name: profile.name,
+      email: profile.email.trim(),
+      organization: profile.organization,
+      job_title: '__super_admin__',
+      status: 'active',
+    });
+  }
+
+  return { success: true, tempPassword: tempPass, employeeId: 'ADMIN' };
+}
+
 // ─── Employee Registration ─────────────────────────────────────
 export async function registerEmployee(profile) {
   // Check duplicate email
@@ -437,14 +539,20 @@ export async function adminCreateEmployee(profile) {
 // person can review multiple employees (separate nomination+reviewer rows each time).
 // This means you can create any number of reviewers without waiting for approval.
 export async function adminCreateReviewer(profile) {
+  // Support both single employeeId (legacy) and employeeIds[] (multi-assign)
+  const employeeIds = profile.employeeIds && profile.employeeIds.length > 0
+    ? profile.employeeIds
+    : profile.employeeId
+      ? [profile.employeeId]
+      : [];
+
+  if (employeeIds.length === 0) return { success: false, error: 'No employee selected.' };
+
   const { data: existingUser } = await supabase
     .from('users')
     .select('id, password')
     .ilike('email', profile.email.trim())
     .maybeSingle();
-
-  const revId   = genId();
-  const nomId   = genId();
 
   let userId   = existingUser?.id || null;
   let tempPass = null;
@@ -464,45 +572,56 @@ export async function adminCreateReviewer(profile) {
     if (ue) return { success: false, error: ue.message };
   } else {
     // ── Existing user: reuse account, surface temp password ────
-    // tempPass stays null — admin already has their credentials
-    tempPass = existingUser.password; // show existing password so admin can share it
+    tempPass = existingUser.password;
   }
 
-  // Always create a NEW nomination row for this employee assignment
-  const { error: ne } = await supabase.from('nominations').insert({
-    id: nomId,
-    employee_id: profile.employeeId,
-    assignment_id: profile.assignmentId || null,
-    reviewer_type: profile.category || 'peer',
-    name: profile.name,
-    role: profile.role || null,
-    department: profile.department || null,
-    designation: profile.designation || null,
-    email: profile.email.trim(),
-    phone: profile.phone || null,
-    approval_status: 'approved',
-  });
-  if (ne) {
-    // Only rollback user creation if we just created it
+  // ── Create one nomination + reviewer row per employee ─────────
+  const failedEmployeeIds = [];
+  for (const empId of employeeIds) {
+    const nomId = genId();
+    const revId = genId();
+
+    const { error: ne } = await supabase.from('nominations').insert({
+      id: nomId,
+      employee_id: empId,
+      assignment_id: profile.assignmentId || null,
+      reviewer_type: profile.category || 'peer',
+      name: profile.name,
+      role: profile.role || null,
+      department: profile.department || null,
+      designation: profile.designation || null,
+      email: profile.email.trim(),
+      phone: profile.phone || null,
+      approval_status: 'approved',
+    });
+    if (ne) { failedEmployeeIds.push(empId); continue; }
+
+    const { error: re } = await supabase.from('reviewers').insert({
+      id: revId,
+      user_id: userId,
+      nomination_id: nomId,
+      employee_id: empId,
+      temp_password: tempPass,
+    });
+    if (re) {
+      await supabase.from('nominations').delete().eq('id', nomId);
+      failedEmployeeIds.push(empId);
+    }
+  }
+
+  // If ALL assignments failed, roll back user creation and report error
+  if (failedEmployeeIds.length === employeeIds.length) {
     if (!existingUser) await supabase.from('users').delete().eq('id', userId);
-    return { success: false, error: ne.message };
+    return { success: false, error: 'Failed to create reviewer assignments. Please try again.' };
   }
 
-  // Always create a NEW reviewer row linked to this nomination + employee
-  const { error: re } = await supabase.from('reviewers').insert({
-    id: revId,
-    user_id: userId,
-    nomination_id: nomId,
-    employee_id: profile.employeeId,
-    temp_password: tempPass,
-  });
-  if (re) {
-    if (!existingUser) await supabase.from('users').delete().eq('id', userId);
-    await supabase.from('nominations').delete().eq('id', nomId);
-    return { success: false, error: re.message };
-  }
-
-  return { success: true, tempPassword: tempPass, isExistingUser: !!existingUser };
+  return {
+    success: true,
+    tempPassword: tempPass,
+    isExistingUser: !!existingUser,
+    assignedCount: employeeIds.length - failedEmployeeIds.length,
+    failedCount: failedEmployeeIds.length,
+  };
 }
 
 // ─── Admin: Get user info linked to employee ───────────────────
@@ -1105,6 +1224,7 @@ export async function getNominations(employeeId) {
   // Build byAssignment map: { assignmentId: { category: [people] } }
   const byAssignment = {};
   for (const nom of data) {
+    if (nom.reviewer_type === '__submitted__') continue; // skip sentinel
     if (!byAssignment[nom.assignment_id]) byAssignment[nom.assignment_id] = {};
     if (!byAssignment[nom.assignment_id][nom.reviewer_type]) byAssignment[nom.assignment_id][nom.reviewer_type] = [];
     byAssignment[nom.assignment_id][nom.reviewer_type].push({
@@ -1119,8 +1239,9 @@ export async function getNominations(employeeId) {
     });
   }
 
-  // Check if submitted (has any approved/pending reviewers)
-  const submitted = data.some(n => n.approval_status !== null);
+  // submitted = a sentinel row with reviewer_type='__submitted__' exists
+  const submitted = data.some(n => n.reviewer_type === '__submitted__');
+  // Only include real nomination rows in the map (exclude sentinel)
   return { employeeId, byAssignment, submitted };
 }
 
@@ -1147,7 +1268,7 @@ export async function saveNominationGroup(employeeId, assignmentId, category, pe
       designation: p.designation || null,
       email: p.email,
       phone: p.phone || null,
-      approval_status: 'pending',
+      approval_status: 'pending',  // pending = waiting for admin approval after employee submits
     }));
 
   if (rows.length > 0) {
@@ -1193,8 +1314,25 @@ export async function submitNominations(employeeId) {
         temp_password: tempPassword,
       });
     }
-    // Mark nomination as pending (stays pending until admin approves)
-    await supabase.from('nominations').update({ approval_status: 'pending' }).eq('id', nom.id);
+    // approval_status is already 'pending' — no change needed
+  }
+  // Insert sentinel row to mark employee has submitted (checked in getNominations)
+  const { data: existingSentinel } = await supabase
+    .from('nominations')
+    .select('id')
+    .eq('employee_id', employeeId)
+    .eq('reviewer_type', '__submitted__')
+    .maybeSingle();
+  if (!existingSentinel) {
+    await supabase.from('nominations').insert({
+      id: genId(),
+      employee_id: employeeId,
+      assignment_id: nominations[0]?.assignment_id || null,
+      reviewer_type: '__submitted__',
+      name: '__submitted__',
+      email: '__submitted__@system',
+      approval_status: 'pending',
+    });
   }
 }
 
@@ -1203,7 +1341,8 @@ export async function getPendingReviewers() {
   const { data } = await supabase
     .from('nominations')
     .select('*, employees(name, department, job_title)')
-    .eq('approval_status', 'pending');
+    .eq('approval_status', 'pending')
+    .neq('reviewer_type', '__submitted__');
   return (data || []).map(mapNomination);
 }
 
@@ -1211,6 +1350,7 @@ export async function getAllReviewers() {
   const { data } = await supabase
     .from('nominations')
     .select('*, employees(name, department, job_title)')
+    .neq('reviewer_type', '__submitted__')
     .order('created_at', { ascending: false });
   return (data || []).map(mapNomination);
 }
@@ -1325,6 +1465,23 @@ export async function getReviewerByUserId(userId) {
     nominationId: rev.nomination_id,
     employeeId: rev.employee_id,       // reviewers.employee_id (authoritative)
   };
+}
+
+// Returns ALL reviewer rows for a user (one per assigned employee)
+export async function getReviewersByUserId(userId) {
+  const { data: rows } = await supabase
+    .from('reviewers')
+    .select('*, nominations(*)')
+    .eq('user_id', userId)
+    .neq('nominations.reviewer_type', '__submitted__');
+  if (!rows || rows.length === 0) return [];
+  return rows.map(rev => ({
+    ...(rev.nominations ? mapNomination(rev.nominations) : {}),
+    id: rev.id,
+    userId: rev.user_id,
+    nominationId: rev.nomination_id,
+    employeeId: rev.employee_id,
+  }));
 }
 
 function mapNomination(row) {

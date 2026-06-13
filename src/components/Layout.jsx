@@ -19,6 +19,7 @@ const NAV = {
   ],
   admin: [
     { id: 'adm-dashboard',   label: 'Dashboard',           icon: LayoutDashboard },
+    { id: 'adm-companies',   label: 'Companies',            icon: Building2 },
     { id: 'adm-employees',   label: 'Employees',            icon: UserCog },
     { id: 'adm-profiles',    label: 'Reviewer Profiles',    icon: Users },
     { id: 'adm-progress',    label: 'Track Progress',       icon: Eye },

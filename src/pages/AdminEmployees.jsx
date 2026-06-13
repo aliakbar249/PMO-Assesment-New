@@ -5,7 +5,8 @@ import {
   getNominations, getAllReviewers,
   adminCreateEmployee, adminResetPassword, adminSetPassword, adminToggleUserStatus,
   getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates, getEmployeeTemplateId,
-  adminCreateCompanyAdmin, getAllCompanyAdmins
+  adminCreateCompanyAdmin, getAllCompanyAdmins, getCompanies,
+  adminCreateSuperAdmin
 } from '../lib/supabase';
 import {
   Button, Card, Input, Select, Alert, Badge, PageHeader,
@@ -29,7 +30,7 @@ const STATUS_CONFIG = {
 };
 
 // ─── Create Company Admin Modal ───────────────────────────────
-function CreateCompanyAdminModal({ onSave, onClose }) {
+function CreateCompanyAdminModal({ onSave, onClose, companies = [] }) {
   const [form, setForm] = useState({ name: '', email: '', organization: '' });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -104,10 +105,24 @@ function CreateCompanyAdminModal({ onSave, onClose }) {
       )}
       <Input label="Full Name"    value={form.name}         onChange={set('name')}         error={errors.name}         required />
       <Input label="Email Address" value={form.email}       onChange={set('email')}        error={errors.email}        type="email" required />
-      <Input label="Organisation"  value={form.organization} onChange={set('organization')} error={errors.organization} required
-        placeholder="Must match the organisation name used in employee profiles" />
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1.5">Company / Organisation <span className="text-red-500">*</span></label>
+        <select
+          value={form.organization}
+          onChange={e => { setForm(f => ({ ...f, organization: e.target.value })); setErrors(er => ({ ...er, organization: '' })); }}
+          className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 bg-white ${
+            errors.organization ? 'border-red-400' : 'border-gray-300'
+          }`}
+        >
+          <option value="">Select company…</option>
+          {companies.filter(c => c.active).map(c => (
+            <option key={c.id} value={c.name}>{c.name}</option>
+          ))}
+        </select>
+        {errors.organization && <p className="text-xs text-red-500 mt-1">{errors.organization}</p>}
+      </div>
       <Alert type="info" className="mt-1">
-        This admin will only see employees whose organisation field matches exactly. A temporary password will be auto-generated.
+        This admin will only see employees whose company matches. A temporary password will be auto-generated.
       </Alert>
       <div className="flex gap-3 justify-end pt-1">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -120,10 +135,10 @@ function CreateCompanyAdminModal({ onSave, onClose }) {
 }
 
 // ─── Create Employee Modal ─────────────────────────────────────
-function CreateEmployeeModal({ onSave, onClose }) {
+function CreateEmployeeModal({ onSave, onClose, companies = [] }) {
   const [form, setForm] = useState({
     name: '', email: '', jobTitle: '', department: '', level: '',
-    organization: '', phone: '', location: '', manager: '',
+    organization: '', phone: '', location: '', manager: '', role: 'employee',
   });
   const [errors, setErrors]   = useState({});
   const [saving, setSaving]   = useState(false);
@@ -136,8 +151,8 @@ function CreateEmployeeModal({ onSave, onClose }) {
     if (!form.name.trim())         e.name = 'Name is required';
     if (!form.email.trim())        e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
-    if (!form.jobTitle.trim())     e.jobTitle = 'Job title is required';
-    if (!form.organization.trim()) e.organization = 'Organization is required';
+    if (form.role !== 'admin' && !form.jobTitle.trim()) e.jobTitle = 'Job title is required';
+    if (!form.organization.trim()) e.organization = 'Company is required';
     return e;
   };
 
@@ -145,7 +160,9 @@ function CreateEmployeeModal({ onSave, onClose }) {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
     setSaving(true);
-    const res = await adminCreateEmployee(form);
+    const res = form.role === 'admin'
+      ? await adminCreateSuperAdmin(form)
+      : await adminCreateEmployee(form);
     setSaving(false);
     if (!res.success) { setErrors({ general: res.error }); return; }
     setResult(res);
@@ -193,35 +210,87 @@ function CreateEmployeeModal({ onSave, onClose }) {
     );
   }
 
+  const isAdmin = form.role === 'admin';
+
   return (
     <div className="space-y-3">
       {errors.general && (
         <Alert type="error"><div className="flex gap-2"><AlertCircle size={14} />{errors.general}</div></Alert>
       )}
+
+      {/* Role selector */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1.5">Account Role <span className="text-red-500">*</span></label>
+        <div className="flex gap-2">
+          {[['employee','Employee'],['admin','Super Admin']].map(([val, lbl]) => (
+            <button key={val} type="button"
+              onClick={() => setForm(f => ({ ...f, role: val }))}
+              className={`flex-1 py-2.5 px-4 rounded-xl border-2 text-sm font-medium transition-all ${
+                form.role === val
+                  ? val === 'admin'
+                    ? 'border-red-400 bg-red-50 text-red-700'
+                    : 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              }`}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        {isAdmin && (
+          <Alert type="warning" className="mt-2">
+            <div className="flex gap-2 text-xs"><AlertCircle size={13} />
+              Super Admins have full access to all data. Use with caution.
+            </div>
+          </Alert>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
-        <Input label="Full Name"     value={form.name}         onChange={set('name')}         error={errors.name}         required />
-        <Input label="Email Address" value={form.email}        onChange={set('email')}        error={errors.email}        type="email" required />
-        <Input label="Job Title"     value={form.jobTitle}     onChange={set('jobTitle')}     error={errors.jobTitle}     required />
-        <Input label="Organization"  value={form.organization} onChange={set('organization')} error={errors.organization} required />
-        <Select label="Department" value={form.department} onChange={set('department')}>
-          <option value="">Select department</option>
-          {DEPARTMENTS.map(d => <option key={d}>{d}</option>)}
-        </Select>
-        <Select label="Level" value={form.level} onChange={set('level')}>
-          <option value="">Select level</option>
-          {LEVELS.map(l => <option key={l}>{l}</option>)}
-        </Select>
-        <Input label="Phone"      value={form.phone}    onChange={set('phone')} />
-        <Input label="Location"   value={form.location} onChange={set('location')} />
-        <Input label="Reports To" value={form.manager}  onChange={set('manager')} wrapClass="col-span-2" />
+        <Input label="Full Name"     value={form.name}     onChange={set('name')}   error={errors.name}  required />
+        <Input label="Email Address" value={form.email}    onChange={set('email')}  error={errors.email} type="email" required />
+        {!isAdmin && (
+          <Input label="Job Title" value={form.jobTitle} onChange={set('jobTitle')} error={errors.jobTitle} required />
+        )}
+        {/* Company dropdown */}
+        <div className={isAdmin ? 'col-span-2' : ''}>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Company <span className="text-red-500">*</span></label>
+          <select
+            value={form.organization}
+            onChange={e => { setForm(f => ({ ...f, organization: e.target.value })); setErrors(er => ({ ...er, organization: '' })); }}
+            className={`w-full px-3 py-2.5 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 bg-white ${
+              errors.organization ? 'border-red-400' : 'border-gray-300'
+            }`}
+          >
+            <option value="">Select company…</option>
+            {companies.filter(c => c.active).map(c => (
+              <option key={c.id} value={c.name}>{c.name}</option>
+            ))}
+          </select>
+          {errors.organization && <p className="text-xs text-red-500 mt-1">{errors.organization}</p>}
+        </div>
+        {!isAdmin && (
+          <>
+            <Select label="Department" value={form.department} onChange={set('department')}>
+              <option value="">Select department</option>
+              {DEPARTMENTS.map(d => <option key={d}>{d}</option>)}
+            </Select>
+            <Select label="Level" value={form.level} onChange={set('level')}>
+              <option value="">Select level</option>
+              {LEVELS.map(l => <option key={l}>{l}</option>)}
+            </Select>
+            <Input label="Phone"      value={form.phone}    onChange={set('phone')} />
+            <Input label="Location"   value={form.location} onChange={set('location')} />
+            <Input label="Reports To" value={form.manager}  onChange={set('manager')} wrapClass="col-span-2" />
+          </>
+        )}
       </div>
       <Alert type="info" className="mt-1">
-        A temporary password will be auto-generated. Share it with the employee — they must change it on first login.
+        A temporary password will be auto-generated. Share it with the user — they must change it on first login.
       </Alert>
       <div className="flex gap-3 justify-end pt-1">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button onClick={handleSave} disabled={saving}>
-          <Plus size={14} />{saving ? 'Creating…' : 'Create Employee'}
+          <Plus size={14} />{saving ? 'Creating…' : isAdmin ? 'Create Admin' : 'Create Employee'}
         </Button>
       </div>
     </div>
@@ -664,7 +733,19 @@ CREATE POLICY "allow_all" ON employee_template_assignments
               <option value="">Select</option>
               {DEPARTMENTS.map(d => <option key={d}>{d}</option>)}
             </Select>
-            <Input label="Organization" value={form.organization || ''} onChange={set('organization')} />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Company</label>
+              <select
+                value={form.organization || ''}
+                onChange={e => setForm(f => ({ ...f, organization: e.target.value }))}
+                className="w-full px-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 bg-white"
+              >
+                <option value="">Select company…</option>
+                {companies.filter(c => c.active).map(c => (
+                  <option key={c.id} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </div>
             <Select label="Level"       value={form.level || ''}        onChange={set('level')}>
               <option value="">Select</option>
               {LEVELS.map(l => <option key={l}>{l}</option>)}
@@ -706,6 +787,7 @@ export default function AdminEmployees() {
   const { refresh, tick } = useApp();
   const [employees,       setEmployees]       = useState([]);
   const [companyAdmins,   setCompanyAdmins]   = useState([]);
+  const [companies,       setCompanies]       = useState([]);
   const [search,          setSearch]          = useState('');
   const [statusFilter,    setStatusFilter]    = useState('all');
   const [deptFilter,      setDeptFilter]      = useState('all');
@@ -721,9 +803,11 @@ export default function AdminEmployees() {
     Promise.all([
       getAllEmployees(),
       getAllCompanyAdmins(),
-    ]).then(([emps, admins]) => {
+      getCompanies(),
+    ]).then(([emps, admins, cos]) => {
       setEmployees(emps || []);
       setCompanyAdmins(admins || []);
+      setCompanies(cos || []);
       setLoading(false);
     });
   }, [tick]);
@@ -945,6 +1029,7 @@ export default function AdminEmployees() {
       {/* Create Employee Modal */}
       <Modal open={createModal} onClose={() => setCreateModal(false)} title="Create New Employee" size="lg">
         <CreateEmployeeModal
+          companies={companies}
           onSave={() => { notify('Employee created successfully.'); refresh(); }}
           onClose={() => setCreateModal(false)}
         />
@@ -966,6 +1051,7 @@ export default function AdminEmployees() {
       {/* Create Company Admin Modal */}
       <Modal open={createAdminModal} onClose={() => setCreateAdminModal(false)} title="Create Company Admin Account" size="md">
         <CreateCompanyAdminModal
+          companies={companies}
           onSave={() => {
             notify('Company admin account created successfully.');
             getAllCompanyAdmins().then(admins => setCompanyAdmins(admins || []));
