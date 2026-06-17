@@ -403,6 +403,59 @@ export async function getCompanyProgressSummary(organization) {
   });
 }
 
+// ─── Company Admin: Reviewer progress for an organisation ─────
+export async function getCompanyReviewerProgress(organization) {
+  if (!organization) return [];
+
+  // 1. Get all employees in this org
+  const employees = await getCompanyEmployees(organization);
+  if (employees.length === 0) return [];
+  const empIds = employees.map(e => e.id);
+  const empMap = Object.fromEntries(employees.map(e => [e.id, e]));
+
+  // 2. Fetch all non-sentinel nominations for these employees
+  const { data: noms } = await supabase
+    .from('nominations')
+    .select('*')
+    .in('employee_id', empIds)
+    .neq('reviewer_type', '__submitted__')
+    .eq('approval_status', 'approved');
+  if (!noms || noms.length === 0) return [];
+
+  const nomIds = noms.map(n => n.id);
+
+  // 3. Fetch reviewer rows to get user_id → nomination mapping
+  const { data: revRows } = await supabase
+    .from('reviewers')
+    .select('id, user_id, nomination_id, employee_id')
+    .in('nomination_id', nomIds);
+  const revRowMap = Object.fromEntries((revRows || []).map(r => [r.nomination_id, r]));
+
+  // 4. Fetch review submission status for each reviewer row
+  const revRowIds = (revRows || []).map(r => r.id);
+  const { data: reviews } = revRowIds.length > 0
+    ? await supabase.from('reviews').select('reviewer_id, status').in('reviewer_id', revRowIds)
+    : { data: [] };
+  const reviewStatusMap = Object.fromEntries((reviews || []).map(r => [r.reviewer_id, r.status]));
+
+  // 5. Build one entry per nomination (= one reviewer ↔ employee pairing)
+  return noms.map(nom => {
+    const revRow     = revRowMap[nom.id] || null;
+    const reviewStatus = revRow ? (reviewStatusMap[revRow.id] || 'not_started') : 'not_started';
+    return {
+      nominationId:  nom.id,
+      reviewerRowId: revRow?.id || null,
+      reviewerName:  nom.name,
+      reviewerEmail: nom.email,
+      reviewerDesignation: nom.designation || '',
+      reviewerDepartment:  nom.department  || '',
+      category:      nom.reviewer_type,
+      employee:      empMap[nom.employee_id] || { id: nom.employee_id, name: 'Unknown' },
+      reviewStatus,                        // 'not_started' | 'in_progress' | 'submitted'
+    };
+  });
+}
+
 // ─── Admin: Create Super Admin user ───────────────────────────
 export async function adminCreateSuperAdmin(profile) {
   const { data: existing } = await supabase
@@ -1758,6 +1811,112 @@ export async function getAssessmentResults(employeeId) {
   } catch (e) {
     console.error('getAssessmentResults error:', e);
     return null;
+  }
+}
+
+// ─── Admin: Reviewer submitted results (all employees) ─────────
+// nomId = nominations.id  (what getAllReviewers returns as reviewer.id)
+// Returns array — one entry per employee this reviewer has a submitted review for.
+// Each entry contains: employee info, review status, and per-section scores
+// with statement-level detail so the admin can see exactly what was rated.
+export async function getReviewerSubmittedResults(nomId) {
+  try {
+    // 1. Find all reviewer rows for this nomination's email
+    //    (a reviewer can be assigned to multiple employees via different nominations
+    //     that share the same user account — we use user_id to find all of them)
+    const { data: thiRevRow } = await supabase
+      .from('reviewers')
+      .select('user_id, employee_id')
+      .eq('nomination_id', nomId)
+      .maybeSingle();
+    if (!thiRevRow?.user_id) return [];
+
+    // 2. Get all reviewer rows for this user (covers multi-employee assignments)
+    const { data: allRevRows } = await supabase
+      .from('reviewers')
+      .select('id, employee_id, nomination_id')
+      .eq('user_id', thiRevRow.user_id);
+    if (!allRevRows || allRevRows.length === 0) return [];
+
+    const revRowIds  = allRevRows.map(r => r.id);
+    const empIds     = [...new Set(allRevRows.map(r => r.employee_id).filter(Boolean))];
+
+    // 3. Fetch all reviews (submitted only)
+    const { data: reviews } = await supabase
+      .from('reviews')
+      .select('reviewer_id, employee_id, responses, assignment_ratings, status, submitted_at')
+      .in('reviewer_id', revRowIds)
+      .eq('status', 'submitted');
+
+    if (!reviews || reviews.length === 0) return [];
+
+    // 4. Fetch employee details and templates in parallel
+    const [empResults, ...templateResults] = await Promise.all([
+      supabase.from('employees').select('*').in('id', empIds),
+      ...empIds.map(eid => getTemplateForEmployee({ id: eid })),
+    ]);
+    const empMap      = Object.fromEntries((empResults.data || []).map(e => [e.id, mapEmployee(e)]));
+    const templateMap = Object.fromEntries(empIds.map((eid, i) => [eid, templateResults[i] || []]));
+
+    // 5. Fetch nominations to get reviewer_type labels for context
+    const nomIds2 = allRevRows.map(r => r.nomination_id).filter(Boolean);
+    const { data: noms } = await supabase
+      .from('nominations')
+      .select('id, reviewer_type, name')
+      .in('id', nomIds2);
+    const nomMap = Object.fromEntries((noms || []).map(n => [n.id, n]));
+
+    // 6. Build result per submitted review
+    const revRowMap = Object.fromEntries(allRevRows.map(r => [r.id, r]));
+
+    return reviews.map(review => {
+      const revRow    = revRowMap[review.reviewer_id];
+      const employee  = empMap[review.employee_id] || { id: review.employee_id, name: 'Unknown' };
+      const sections  = templateMap[review.employee_id] || [];
+      const nom       = nomMap[revRow?.nomination_id] || {};
+      const responses = review.responses || {};
+
+      const sectionAvg = (sectionId) => {
+        const ratings = Object.values(responses[sectionId] || {}).filter(v => v > 0);
+        if (!ratings.length) return null;
+        return +(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(2);
+      };
+
+      const scoredSections = sections.map(sec => {
+        const stmtRatings = responses[sec.id] || {};
+        const statements  = (sec.statements || []).map(stmt => ({
+          id:    stmt.id,
+          text:  stmt.text,
+          value: stmtRatings[stmt.id] ?? null,
+        }));
+        return {
+          id:    sec.id,
+          title: sec.title,
+          avg:   sectionAvg(sec.id),
+          statements,
+        };
+      });
+
+      const allAvgs = scoredSections.map(s => s.avg).filter(v => v !== null);
+      const overallAvg = allAvgs.length
+        ? +(allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length).toFixed(2)
+        : null;
+
+      return {
+        employeeId:      review.employee_id,
+        employee,
+        reviewerRowId:   review.reviewer_id,
+        category:        nom.reviewer_type || null,
+        status:          review.status,
+        submittedAt:     review.submitted_at,
+        overallAvg,
+        sections:        scoredSections,
+        assignmentRatings: review.assignment_ratings || {},
+      };
+    });
+  } catch (e) {
+    console.error('getReviewerSubmittedResults error:', e);
+    return [];
   }
 }
 

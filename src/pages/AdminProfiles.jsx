@@ -4,13 +4,13 @@ import {
   getAllReviewers, approveReviewer, rejectReviewer, updateReviewer,
   setReviewerStatus, getAllEmployees,
   adminCreateReviewer, adminResetPassword, adminSetPassword,
-  getUserByNominationId
+  getUserByNominationId, getReviewerSubmittedResults
 } from '../lib/supabase';
 import { Button, Card, Badge, Input, Select, Alert, Modal, PageHeader, EmptyState } from '../components/UI';
 import {
   CheckCircle, X, Edit3, ChevronDown, ChevronUp, Shield,
   Plus, KeyRound, Copy, Power, PowerOff, RefreshCw, Lock,
-  Users, AlertCircle, UserCheck
+  Users, AlertCircle, UserCheck, BarChart2, Star, ChevronRight
 } from 'lucide-react';
 
 const STATUS_COLORS = { pending: 'warning', approved: 'success', rejected: 'danger' };
@@ -380,7 +380,7 @@ function EditReviewerModal({ reviewer, onSave, onClose }) {
 }
 
 // ─── Reviewer Card ─────────────────────────────────────────────
-function ReviewerCard({ reviewer, onApprove, onReject, onEdit, onPassword, onToggleStatus }) {
+function ReviewerCard({ reviewer, onApprove, onReject, onEdit, onPassword, onToggleStatus, onViewResults }) {
   const [expanded, setExpanded] = useState(false);
   const isApproved = reviewer.approvalStatus === 'approved';
   const isRejected = reviewer.approvalStatus === 'rejected';
@@ -453,6 +453,12 @@ function ReviewerCard({ reviewer, onApprove, onReject, onEdit, onPassword, onTog
             <button onClick={() => setExpanded(!expanded)} className="text-indigo-600 flex items-center gap-1">
               Details {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             </button>
+            {isApproved && (
+              <button onClick={() => onViewResults(reviewer)}
+                className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-600 hover:bg-indigo-100 transition-colors font-medium">
+                <BarChart2 size={11} />View Results
+              </button>
+            )}
           </div>
 
           {expanded && (
@@ -480,6 +486,230 @@ function ReviewerCard({ reviewer, onApprove, onReject, onEdit, onPassword, onTog
   );
 }
 
+// ─── Reviewer Results Modal ────────────────────────────────────
+const RATING_LABELS = { 5:'Always', 4:'Often', 3:'Sometimes', 2:'Seldom', 1:'Never', 0:'Not Observed' };
+const RATING_COLOR  = { 5:'text-emerald-600', 4:'text-green-600', 3:'text-amber-600', 2:'text-orange-500', 1:'text-red-500', 0:'text-gray-400' };
+const CATEGORY_LABELS_MAP = {
+  sponsor:'Sponsor', supervisor:'Supervisor', peer:'Peer', client:'Client', teamMember:'Team Member',
+};
+
+function ReviewerResultsModal({ reviewer, onClose }) {
+  const [results,  setResults]  = useState(null);
+  const [loading,  setLoading]  = useState(true);
+  const [activeEmp, setActiveEmp] = useState(null); // employeeId of selected tab
+  const [expanded, setExpanded] = useState({});     // { sectionId: bool }
+
+  useEffect(() => {
+    getReviewerSubmittedResults(reviewer.id).then(data => {
+      setResults(data || []);
+      if (data && data.length > 0) setActiveEmp(data[0].employeeId);
+      setLoading(false);
+    });
+  }, [reviewer.id]);
+
+  const toggleSection = id => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-12 text-gray-400 text-sm">
+      Loading results…
+    </div>
+  );
+
+  if (!results || results.length === 0) return (
+    <div className="py-8 text-center">
+      <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+        <BarChart2 size={24} className="text-gray-400" />
+      </div>
+      <p className="text-sm font-semibold text-gray-600 mb-1">No submitted reviews yet</p>
+      <p className="text-xs text-gray-400">{reviewer.name} hasn't submitted any assessments.</p>
+    </div>
+  );
+
+  const current = results.find(r => r.employeeId === activeEmp) || results[0];
+  const allAvgs = current.sections.map(s => s.avg).filter(v => v !== null);
+  const overallAvg = allAvgs.length
+    ? (allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length).toFixed(2)
+    : null;
+
+  return (
+    <div className="space-y-4">
+      {/* Reviewer summary header */}
+      <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-2xl">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-700 flex items-center justify-center shrink-0">
+          <span className="text-white font-bold">{reviewer.name?.[0]?.toUpperCase()}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-indigo-900">{reviewer.name}</p>
+          <p className="text-xs text-indigo-600">
+            {reviewer.designation}{reviewer.department ? ` · ${reviewer.department}` : ''}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs font-semibold text-indigo-700">
+            {CATEGORY_LABELS_MAP[reviewer.category] || reviewer.category}
+          </p>
+          <p className="text-xs text-indigo-500">{results.length} review{results.length !== 1 ? 's' : ''} submitted</p>
+        </div>
+      </div>
+
+      {/* Employee tabs — only shown when reviewer has multiple employees */}
+      {results.length > 1 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 mb-2">Reviewing employees:</p>
+          <div className="flex gap-2 flex-wrap">
+            {results.map(r => (
+              <button key={r.employeeId} onClick={() => setActiveEmp(r.employeeId)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border-2 transition-all
+                  ${activeEmp === r.employeeId
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'}`}>
+                <div className="w-5 h-5 rounded-lg bg-current/20 flex items-center justify-center">
+                  <span className="font-bold" style={{ fontSize: '10px' }}>{r.employee.name?.[0]?.toUpperCase()}</span>
+                </div>
+                {r.employee.name}
+                {activeEmp === r.employeeId && <ChevronRight size={11} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Selected employee context */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-xs text-gray-500">Reviewing</p>
+          <p className="text-sm font-bold text-gray-800">{current.employee.name}</p>
+          <p className="text-xs text-gray-500">
+            {current.employee.jobTitle}{current.employee.department ? ` · ${current.employee.department}` : ''}
+          </p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {overallAvg && (
+            <div className="text-center px-4 py-2 bg-emerald-50 border-2 border-emerald-200 rounded-2xl">
+              <p className="text-xs font-semibold text-emerald-600">Overall Avg</p>
+              <p className="text-xl font-bold text-emerald-700">{overallAvg}</p>
+              <p className="text-xs text-emerald-500">out of 5</p>
+            </div>
+          )}
+          <div className="text-center px-3 py-2 bg-gray-50 border border-gray-200 rounded-2xl">
+            <p className="text-xs font-semibold text-gray-500">Sections</p>
+            <p className="text-lg font-bold text-gray-700">
+              {current.sections.filter(s => s.avg !== null).length}/{current.sections.length}
+            </p>
+            <p className="text-xs text-gray-400">rated</p>
+          </div>
+          {current.submittedAt && (
+            <div className="text-center px-3 py-2 bg-blue-50 border border-blue-200 rounded-2xl">
+              <p className="text-xs font-semibold text-blue-500">Submitted</p>
+              <p className="text-sm font-bold text-blue-700">
+                {new Date(current.submittedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short' })}
+              </p>
+              <p className="text-xs text-blue-400">
+                {new Date(current.submittedAt).getFullYear()}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Section-by-section scores */}
+      <div className="space-y-2">
+        {current.sections.map(sec => (
+          <div key={sec.id} className="border border-gray-200 rounded-2xl overflow-hidden">
+            {/* Section header — always visible */}
+            <button onClick={() => toggleSection(sec.id)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-sm font-semibold text-gray-800 truncate">{sec.title}</span>
+                {sec.avg !== null ? (
+                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg shrink-0">
+                    {sec.avg.toFixed(2)}
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-400 text-xs rounded-lg shrink-0">—</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0 ml-2">
+                {/* Mini progress dots */}
+                <div className="flex gap-0.5">
+                  {sec.statements.map(stmt => (
+                    <div key={stmt.id} title={stmt.value !== null ? `${stmt.value} — ${RATING_LABELS[stmt.value]}` : 'Not rated'}
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        stmt.value === null ? 'bg-gray-200' :
+                        stmt.value === 0    ? 'bg-gray-300' :
+                        stmt.value >= 4     ? 'bg-emerald-400' :
+                        stmt.value === 3    ? 'bg-amber-400' : 'bg-red-400'
+                      }`} />
+                  ))}
+                </div>
+                {expanded[sec.id] ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+              </div>
+            </button>
+
+            {/* Statement detail — expanded */}
+            {expanded[sec.id] && (
+              <div className="divide-y divide-gray-50">
+                {sec.statements.map((stmt, idx) => (
+                  <div key={stmt.id} className="flex items-start gap-3 px-4 py-2.5 hover:bg-gray-50/50">
+                    <span className="text-xs text-gray-300 font-mono w-5 shrink-0 mt-0.5">{idx + 1}</span>
+                    <p className="flex-1 text-xs text-gray-700 leading-relaxed">{stmt.text}</p>
+                    <div className="shrink-0 flex flex-col items-end gap-0.5 ml-2">
+                      {stmt.value !== null ? (
+                        <>
+                          <div className="flex items-center gap-1">
+                            <Star size={10} className={stmt.value > 0 ? 'text-amber-400 fill-amber-400' : 'text-gray-300'} />
+                            <span className={`text-xs font-bold ${RATING_COLOR[stmt.value] || 'text-gray-400'}`}>
+                              {stmt.value > 0 ? stmt.value : '—'}
+                            </span>
+                          </div>
+                          <span className={`text-xs ${RATING_COLOR[stmt.value] || 'text-gray-400'}`}>
+                            {RATING_LABELS[stmt.value]}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-300">Not rated</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Assignment ratings */}
+      {Object.keys(current.assignmentRatings || {}).length > 0 && (
+        <div className="border border-gray-200 rounded-2xl overflow-hidden">
+          <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+            <span className="text-sm font-semibold text-gray-800">Assignment Ratings</span>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {Object.entries(current.assignmentRatings).map(([assignId, ratings]) => (
+              <div key={assignId} className="px-4 py-3">
+                <p className="text-xs font-semibold text-gray-600 mb-2">Assignment: {assignId.substring(0, 8)}…</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(ratings).map(([qId, val]) => (
+                    <div key={qId} className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-lg">
+                      <span className="text-xs text-gray-500">{qId}</span>
+                      <span className={`text-xs font-bold ${RATING_COLOR[val] || 'text-gray-500'}`}>{val}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button onClick={onClose}
+        className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-sm font-medium text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors">
+        Close
+      </button>
+    </div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────
 export default function AdminProfiles() {
   const { refresh, tick } = useApp();
@@ -490,6 +720,7 @@ export default function AdminProfiles() {
   const [rejectModal,   setRejectModal]   = useState(null);
   const [rejectReason,  setRejectReason]  = useState('');
   const [passwordModal, setPasswordModal] = useState(null);
+  const [resultsModal,  setResultsModal]  = useState(null); // reviewer object
   const [notification,  setNotification]  = useState({ msg: '', type: 'success' });
   const [loading,       setLoading]       = useState(true);
 
@@ -598,6 +829,7 @@ export default function AdminProfiles() {
               onEdit={setEditModal}
               onPassword={setPasswordModal}
               onToggleStatus={handleToggleStatus}
+              onViewResults={setResultsModal}
             />
           ))}
         </div>
@@ -636,6 +868,14 @@ export default function AdminProfiles() {
         title={`Password — ${passwordModal?.name}`} size="sm">
         {passwordModal && (
           <ReviewerPasswordModal reviewer={passwordModal} onClose={() => setPasswordModal(null)} />
+        )}
+      </Modal>
+
+      {/* Results Modal */}
+      <Modal open={!!resultsModal} onClose={() => setResultsModal(null)}
+        title={`Assessment Results — ${resultsModal?.name}`} size="lg">
+        {resultsModal && (
+          <ReviewerResultsModal reviewer={resultsModal} onClose={() => setResultsModal(null)} />
         )}
       </Modal>
     </div>
