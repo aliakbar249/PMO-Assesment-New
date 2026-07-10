@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   getAutoRules, saveAutoRule, deleteAutoRule, toggleAutoRule,
   getActiveCustomFields, getHierarchyLevels, getOrgEmployees,
@@ -6,6 +6,8 @@ import {
   getAllAutoRuleLogs, clearAutoRuleLogs, logAutoRuleAction,
   RULE_OPERATORS, RULE_ACTION_TYPES, RULE_TRIGGERS,
 } from '../lib/orgDb';
+import { getKPITemplates, getTrainingModules } from '../lib/kpiTraining';
+import { getAssessmentTemplates } from '../lib/supabase';
 import {
   Plus, Edit2, Trash2, CheckCircle, AlertTriangle, X, ChevronDown, ChevronRight,
   Zap, ToggleLeft, ToggleRight, Play, ArrowUp, ArrowDown, Settings,
@@ -112,24 +114,86 @@ function ConditionRow({ condition, index, fields, levels, onChange, onRemove }) 
   );
 }
 
+// ─── Entity picker config per action type ────────────────────────────────────
+const ENTITY_CONFIG = {
+  assign_assessment_template: {
+    placeholder: 'Select assessment template…',
+    emptyMsg:    'No assessment templates found',
+  },
+  assign_kpi_template: {
+    placeholder: 'Select KPI template…',
+    emptyMsg:    'No KPI templates found',
+  },
+  assign_training_module: {
+    placeholder: 'Select training module…',
+    emptyMsg:    'No training modules found',
+  },
+};
+
 // ─── Action row ───────────────────────────────────────────────────────────────
-function ActionRow({ action, index, onChange, onRemove }) {
+function ActionRow({ action, index, onChange, onRemove, entityLists }) {
+  // entityLists = { assessmentTemplates: [], kpiTemplates: [], trainingModules: [] }
+  const { assessmentTemplates = [], kpiTemplates = [], trainingModules = [] } = entityLists || {};
+
+  // Map action type → list of { id, label } for the dropdown
+  const getOptions = (type) => {
+    if (type === 'assign_assessment_template')
+      return assessmentTemplates.map(t => ({ id: t.id, label: t.name || t.id }));
+    if (type === 'assign_kpi_template')
+      return kpiTemplates.map(t => ({ id: t.id, label: t.name || t.id }));
+    if (type === 'assign_training_module')
+      return trainingModules.map(t => ({ id: t.id, label: t.title || t.name || t.id }));
+    return [];
+  };
+
+  const cfg     = ENTITY_CONFIG[action.type] || {};
+  const options = getOptions(action.type);
+  const hasType = !!action.type;
+
+  const handleTypeChange = (e) => {
+    // Change type AND clear entityId in one update
+    onChange(index, 'type',     e.target.value);
+    onChange(index, 'entityId', '');
+  };
+
   return (
-    <div className="flex items-center gap-2">
-      <span className="px-2 py-1 bg-emerald-100 text-emerald-600 text-xs font-bold rounded flex-shrink-0">THEN</span>
-      <select value={action.type || ''} onChange={e => onChange(index, 'type', e.target.value)}
-        className="flex-shrink-0 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]"
-        style={{ minWidth: 220 }}>
-        <option value="">— action type —</option>
-        {RULE_ACTION_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-      <input type="text" value={action.entityId || ''} onChange={e => onChange(index, 'entityId', e.target.value)}
-        placeholder="Template / module ID"
-        className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]" />
-      <button type="button" onClick={() => onRemove(index)}
-        className="p-1.5 rounded-lg text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors flex-shrink-0">
-        <X size={14} />
-      </button>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="px-2 py-1 bg-emerald-100 text-emerald-600 text-xs font-bold rounded flex-shrink-0">THEN</span>
+        <select value={action.type || ''} onChange={handleTypeChange}
+          className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]">
+          <option value="">— select action type —</option>
+          {RULE_ACTION_TYPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <button type="button" onClick={() => onRemove(index)}
+          className="p-1.5 rounded-lg text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors flex-shrink-0">
+          <X size={14} />
+        </button>
+      </div>
+
+      {/* Entity dropdown — only shown once a type is selected */}
+      {hasType && (
+        <div className="ml-[60px]">
+          {options.length === 0 ? (
+            <p className="text-xs text-gray-400 italic px-1">{cfg.emptyMsg || 'No items found'}</p>
+          ) : (
+            <select
+              value={action.entityId || ''}
+              onChange={e => onChange(index, 'entityId', e.target.value)}
+              className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] bg-white">
+              <option value="">{cfg.placeholder || '— select —'}</option>
+              {options.map(o => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
+          {action.entityId && (
+            <p className="mt-0.5 text-[10px] text-gray-400 font-mono px-1">ID: {action.entityId}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -250,6 +314,32 @@ function RuleFormModal({ rule, allRules, fields, levels, onClose, onSaved }) {
   });
   const [errors, setErrors] = useState({});
 
+  // ── Load entity lists for the action dropdowns ─────────────────
+  const [entityLists, setEntityLists] = useState({
+    assessmentTemplates: [],
+    kpiTemplates:        [],
+    trainingModules:     [],
+  });
+  const [loadingEntities, setLoadingEntities] = useState(true);
+
+  useEffect(() => {
+    // KPI templates + training modules are synchronous (localStorage)
+    const kpiTemplates   = getKPITemplates()   || [];
+    const trainingModules = getTrainingModules() || [];
+    // Assessment templates are async (Supabase)
+    getAssessmentTemplates().then(assessmentTemplates => {
+      setEntityLists({
+        assessmentTemplates: assessmentTemplates || [],
+        kpiTemplates,
+        trainingModules,
+      });
+      setLoadingEntities(false);
+    }).catch(() => {
+      setEntityLists({ assessmentTemplates: [], kpiTemplates, trainingModules });
+      setLoadingEntities(false);
+    });
+  }, []);
+
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(er => ({ ...er, [k]: '' })); };
 
   const addCondition    = () => set('conditions', [...form.conditions, { field: '', operator: 'equals', value: '' }]);
@@ -265,7 +355,12 @@ function RuleFormModal({ rule, allRules, fields, levels, onClose, onSaved }) {
   const removeAction = (i) => set('actions', form.actions.filter((_, idx) => idx !== i));
   const changeAction = (i, key, val) => {
     const next = [...form.actions];
-    next[i] = { ...next[i], [key]: val };
+    if (key === 'type') {
+      // When action type changes, always clear the entityId to avoid stale IDs
+      next[i] = { ...next[i], type: val, entityId: '' };
+    } else {
+      next[i] = { ...next[i], [key]: val };
+    }
     set('actions', next);
   };
 
@@ -388,9 +483,13 @@ function RuleFormModal({ rule, allRules, fields, levels, onClose, onSaved }) {
                 <Plus size={13} /> Add Action
               </button>
             </div>
-            <div className="space-y-2 bg-emerald-50/40 rounded-xl p-3">
+            <div className="space-y-3 bg-emerald-50/40 rounded-xl p-3">
+              {loadingEntities && (
+                <p className="text-xs text-gray-400 text-center py-1">Loading templates & modules…</p>
+              )}
               {form.actions.map((action, i) => (
-                <ActionRow key={i} action={action} index={i} onChange={changeAction} onRemove={removeAction} />
+                <ActionRow key={i} action={action} index={i} onChange={changeAction} onRemove={removeAction}
+                  entityLists={entityLists} />
               ))}
               {form.actions.length === 0 && (
                 <p className="text-xs text-gray-400 text-center py-3">No actions yet. Add at least one.</p>
