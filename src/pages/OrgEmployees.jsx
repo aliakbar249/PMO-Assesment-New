@@ -1,0 +1,642 @@
+import { useState, useMemo } from 'react';
+import {
+  getOrgEmployees, saveOrgEmployee, deleteOrgEmployee,
+  getHierarchyLevels,
+  getCustomFields, getCustomFieldValues, saveCustomFieldValue, getProfileCompleteness,
+  getPositions, getOccupancies, getEmployeePrimaryPosition,
+  OCCUPANCY_TYPES,
+} from '../lib/orgDb';
+import {
+  Users, Plus, Edit2, Trash2, Search, X, CheckCircle, AlertTriangle,
+  ChevronDown, ChevronRight, EyeOff, GitBranch, Briefcase, Mail,
+  MapPin, Save,
+} from 'lucide-react';
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function Toast({ message, type, onClose }) {
+  return (
+    <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl text-sm font-medium
+      ${type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'}`}>
+      {type === 'success' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+      <span>{message}</span>
+      <button onClick={onClose} className="ml-1 opacity-70 hover:opacity-100"><X size={14} /></button>
+    </div>
+  );
+}
+
+// ─── Field editor — renders correct input per fieldType ───────────────────────
+function FieldEditor({ field, value, onChange }) {
+  if (field.fieldType === 'dropdown_single') {
+    return (
+      <select value={value || ''} onChange={e => onChange(e.target.value)}
+        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]">
+        <option value="">— select —</option>
+        {(field.options || []).map(o => <option key={o}>{o}</option>)}
+      </select>
+    );
+  }
+  if (field.fieldType === 'dropdown_multi') {
+    let selected = [];
+    try { selected = JSON.parse(value || '[]'); } catch {}
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {(field.options || []).map(o => {
+          const isSel = selected.includes(o);
+          return (
+            <button key={o} type="button"
+              onClick={() => onChange(JSON.stringify(isSel ? selected.filter(v => v !== o) : [...selected, o]))}
+              className={`px-2 py-0.5 text-xs rounded-full border transition-all
+                ${isSel ? 'bg-[#01A2B1] text-white border-[#01A2B1]' : 'border-gray-200 text-gray-600 hover:border-[#01A2B1]/50 bg-white'}`}>
+              {o}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+  if (field.fieldType === 'toggle') {
+    return (
+      <div className="flex items-center gap-2">
+        <button type="button"
+          onClick={() => onChange(value === 'true' ? 'false' : 'true')}
+          className="relative w-10 h-5 rounded-full transition-colors flex-shrink-0"
+          style={{ background: value === 'true' ? '#01A2B1' : '#D1D5DB' }}>
+          <span className="absolute bg-white rounded-full shadow transition-transform"
+            style={{ width: 16, height: 16, top: 2, left: 2, transform: value === 'true' ? 'translateX(20px)' : 'none' }} />
+        </button>
+        <span className="text-sm text-gray-600">{value === 'true' ? 'Yes' : 'No'}</span>
+      </div>
+    );
+  }
+  if (field.fieldType === 'textarea') {
+    return (
+      <textarea value={value || ''} onChange={e => onChange(e.target.value)} rows={2}
+        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] resize-none" />
+    );
+  }
+  if (field.fieldType === 'org_unit_lookup') {
+    // free text for now — the lookup dropdown is handled in OrgUnits context
+    return (
+      <input type="text" value={value || ''} onChange={e => onChange(e.target.value)}
+        placeholder="Org unit ID or name"
+        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]" />
+    );
+  }
+  return (
+    <input
+      type={field.fieldType === 'number' ? 'number' : field.fieldType === 'date' ? 'date' : 'text'}
+      value={value || ''} onChange={e => onChange(e.target.value)}
+      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]" />
+  );
+}
+
+// ─── Display value for a custom field ────────────────────────────────────────
+function FieldDisplay({ value, fieldType }) {
+  if (!value || value === '' || value === '[]') {
+    return <span className="text-gray-300 italic text-xs">—</span>;
+  }
+  try {
+    const arr = JSON.parse(value);
+    if (Array.isArray(arr) && arr.length > 0) {
+      return (
+        <div className="flex flex-wrap gap-1">
+          {arr.map(v => <span key={v} className="px-1.5 py-0.5 bg-[#01A2B1]/10 text-[#01A2B1] text-xs rounded-full">{v}</span>)}
+        </div>
+      );
+    }
+  } catch {}
+  if (value === 'true')  return <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-xs rounded-full font-medium">Yes</span>;
+  if (value === 'false') return <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full font-medium">No</span>;
+  return <span className="text-sm text-gray-800">{value}</span>;
+}
+
+// ─── Employee Form Modal (create + edit + custom fields) ───────────────────────
+function EmployeeModal({ employee, levels, customFields, onClose, onSaved }) {
+  const isEdit = !!employee?.id;
+
+  // Core profile fields
+  const [form, setForm] = useState({
+    name:    employee?.name    || '',
+    email:   employee?.email   || '',
+    levelId: employee?.levelId || '',
+    city:    employee?.city    || '',
+    status:  employee?.status  || 'active',
+  });
+  const [errors, setErrors] = useState({});
+
+  // Custom field values — keyed by fieldDefinitionId
+  const existingValues = isEdit ? getCustomFieldValues(employee.id) : [];
+  const [cfValues, setCfValues] = useState(() => {
+    const map = {};
+    existingValues.forEach(v => { map[v.fieldDefinitionId] = v.value; });
+    return map;
+  });
+
+  const [activeSection, setActiveSection] = useState(null); // which section is expanded
+
+  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
+  const setCf = (fieldId, val) => setCfValues(prev => ({ ...prev, [fieldId]: val }));
+
+  // Group custom fields by section
+  const sectionedFields = useMemo(() => {
+    const active = customFields.filter(f => f.status === 'active');
+    const sections = {};
+    active.forEach(f => {
+      if (!sections[f.section]) sections[f.section] = [];
+      sections[f.section].push(f);
+    });
+    // Sort each section by displayOrder
+    Object.keys(sections).forEach(s => sections[s].sort((a, b) => a.displayOrder - b.displayOrder));
+    return sections;
+  }, [customFields]);
+
+  const validate = () => {
+    const e = {};
+    if (!form.name.trim())  e.name  = 'Full name is required';
+    if (!form.email.trim()) e.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
+    if (!form.levelId)      e.levelId = 'Hierarchy level is required';
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleSave = () => {
+    if (!validate()) return;
+
+    // Save core employee record
+    const empRecord = {
+      ...(isEdit ? employee : {}),
+      name:    form.name.trim(),
+      email:   form.email.trim(),
+      levelId: form.levelId,
+      city:    form.city.trim(),
+      status:  form.status,
+    };
+    saveOrgEmployee(empRecord);
+
+    // If editing, we know the ID. If creating, we need to re-read to get the new ID.
+    if (isEdit) {
+      // Save custom field values for existing employee
+      Object.entries(cfValues).forEach(([fieldId, val]) => {
+        if (val !== undefined && val !== null) {
+          saveCustomFieldValue(employee.id, fieldId, val, 'admin');
+        }
+      });
+    } else {
+      // For new employees, find the newly created record by email
+      const all = getOrgEmployees();
+      const newEmp = all.find(e => e.email === empRecord.email);
+      if (newEmp) {
+        Object.entries(cfValues).forEach(([fieldId, val]) => {
+          if (val !== undefined && val !== null && val !== '') {
+            saveCustomFieldValue(newEmp.id, fieldId, val, 'admin');
+          }
+        });
+      }
+    }
+
+    onSaved(isEdit ? 'Employee updated.' : 'Employee created.');
+  };
+
+  const sectionNames = Object.keys(sectionedFields);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[94vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <h2 className="text-base font-semibold text-gray-800">
+            {isEdit ? `Edit — ${employee.name}` : 'Add New Employee'}
+          </h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
+          {/* ── Core Profile ── */}
+          <div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Core Profile</div>
+            <div className="grid grid-cols-2 gap-3">
+              {/* Name */}
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Full Name <span className="text-red-500">*</span></label>
+                <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Tariq Mahmood"
+                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] ${errors.name ? 'border-red-400' : 'border-gray-300'}`} />
+                {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Email <span className="text-red-500">*</span></label>
+                <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="user@company.com"
+                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] ${errors.email ? 'border-red-400' : 'border-gray-300'}`} />
+                {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
+              </div>
+
+              {/* Hierarchy Level */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Hierarchy Level <span className="text-red-500">*</span></label>
+                <select value={form.levelId} onChange={e => set('levelId', e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] ${errors.levelId ? 'border-red-400' : 'border-gray-300'}`}>
+                  <option value="">— select level —</option>
+                  {levels.map(l => (
+                    <option key={l.id} value={l.id}>{l.name} ({l.abbreviation})</option>
+                  ))}
+                </select>
+                {errors.levelId && <p className="text-xs text-red-500 mt-1">{errors.levelId}</p>}
+              </div>
+
+              {/* City */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">City</label>
+                <input value={form.city} onChange={e => set('city', e.target.value)} placeholder="e.g. Lahore"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]" />
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
+                <select value={form.status} onChange={e => set('status', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]">
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Custom Field Sections ── */}
+          {sectionNames.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Custom Fields</div>
+              <div className="space-y-2">
+                {sectionNames.map(sectionName => {
+                  const fields = sectionedFields[sectionName];
+                  const isOpen = activeSection === sectionName;
+                  const filledCount = fields.filter(f => {
+                    const v = cfValues[f.id];
+                    return v && v !== '' && v !== '[]';
+                  }).length;
+
+                  return (
+                    <div key={sectionName} className="border border-gray-200 rounded-xl overflow-hidden">
+                      {/* Section header */}
+                      <button
+                        type="button"
+                        onClick={() => setActiveSection(isOpen ? null : sectionName)}
+                        className="w-full flex items-center gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                      >
+                        {isOpen ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
+                        <span className="text-sm font-medium text-gray-700">{sectionName}</span>
+                        <span className="ml-auto text-xs text-gray-400">{filledCount}/{fields.length} filled</span>
+                        {filledCount < fields.length && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                        )}
+                      </button>
+
+                      {/* Fields */}
+                      {isOpen && (
+                        <div className="px-4 py-4 space-y-4">
+                          {fields.map(f => (
+                            <div key={f.id}>
+                              <label className="flex items-center gap-1.5 text-xs font-medium text-gray-600 mb-1.5">
+                                {f.label}
+                                {f.isRequired && <span className="text-red-400">*</span>}
+                                {!f.isVisibleToEmployee && (
+                                  <span className="flex items-center gap-0.5 text-amber-500">
+                                    <EyeOff size={10} /><span className="text-xs font-normal">Admin only</span>
+                                  </span>
+                                )}
+                              </label>
+                              <FieldEditor
+                                field={f}
+                                value={cfValues[f.id] ?? ''}
+                                onChange={val => setCf(f.id, val)}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-100">
+            Cancel
+          </button>
+          <button onClick={handleSave}
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90"
+            style={{ background: '#01A2B1' }}>
+            <Save size={14} />{isEdit ? 'Save Changes' : 'Create Employee'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Delete Confirm ───────────────────────────────────────────────────────────
+function DeleteConfirm({ employee, onClose, onConfirm }) {
+  const primaryPos = getEmployeePrimaryPosition(employee.id);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+            <Trash2 size={18} className="text-red-600" />
+          </div>
+          <h2 className="text-base font-semibold text-gray-800">Delete Employee?</h2>
+        </div>
+        <p className="text-sm text-gray-600 mb-1">
+          Delete <strong>{employee.name}</strong>? This will remove all their custom field values and occupancy records.
+        </p>
+        {primaryPos && (
+          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+            ⚠ This employee currently holds <strong>{primaryPos.title}</strong>. Their occupancy will also be removed.
+          </p>
+        )}
+        <p className="text-xs text-gray-400 mb-5">This action cannot be undone.</p>
+        <div className="flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+          <button onClick={onConfirm} className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium">Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Employee Row Card ────────────────────────────────────────────────────────
+function EmployeeCard({ employee, levels, customFields, onEdit, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  const level = levels.find(l => l.id === employee.levelId);
+  const primaryPos = getEmployeePrimaryPosition(employee.id);
+  const cfValues = getCustomFieldValues(employee.id);
+  const completeness = getProfileCompleteness(employee.id);
+
+  const getCfValue = (fieldId) => cfValues.find(v => v.fieldDefinitionId === fieldId)?.value || '';
+
+  // Active custom fields that have values
+  const filledFields = customFields
+    .filter(f => f.status === 'active')
+    .filter(f => {
+      const v = getCfValue(f.id);
+      return v && v !== '' && v !== '[]';
+    })
+    .slice(0, 6); // cap preview at 6
+
+  return (
+    <div className={`bg-white rounded-xl border-2 transition-all ${employee.status === 'active' ? 'border-gray-200 hover:border-gray-300' : 'border-dashed border-gray-200 opacity-60'}`}>
+      <div className="flex items-center gap-3 px-4 py-3">
+        {/* Avatar */}
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-white text-sm"
+          style={{ background: level?.colorTag || '#01A2B1' }}>
+          {employee.name?.[0]?.toUpperCase() || '?'}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm text-gray-800">{employee.name}</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${employee.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+              {employee.status === 'active' ? 'Active' : 'Inactive'}
+            </span>
+            {level && (
+              <span className="px-1.5 py-0.5 rounded-full text-xs font-medium text-white" style={{ background: level.colorTag || '#6B7280' }}>
+                {level.abbreviation}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-2 flex-wrap">
+            <span className="flex items-center gap-1"><Mail size={10} />{employee.email}</span>
+            {employee.city && <span className="flex items-center gap-1"><MapPin size={10} />{employee.city}</span>}
+            {primaryPos
+              ? <span className="flex items-center gap-1"><Briefcase size={10} />{primaryPos.title}</span>
+              : <span className="flex items-center gap-1 text-amber-500"><Briefcase size={10} />No position</span>}
+          </div>
+
+          {/* Completeness bar */}
+          {completeness.total > 0 && (
+            <div className="mt-1.5 flex items-center gap-2">
+              <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden max-w-[120px]">
+                <div className="h-full rounded-full" style={{
+                  width: `${completeness.pct}%`,
+                  background: completeness.pct >= 80 ? '#059669' : completeness.pct >= 50 ? '#D97706' : '#DC2626',
+                }} />
+              </div>
+              <span className="text-xs text-gray-400">{completeness.pct}% complete</span>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button onClick={() => setExpanded(e => !e)}
+            className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors">
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+          <button onClick={onEdit}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-[#01A2B1] hover:bg-[#01A2B1]/10 transition-colors">
+            <Edit2 size={14} />
+          </button>
+          <button onClick={onDelete}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded detail — shows all filled custom fields */}
+      {expanded && (
+        <div className="border-t border-gray-100 px-4 py-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {filledFields.map(f => (
+              <div key={f.id} className="bg-gray-50 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-1 mb-0.5">
+                  <span className="text-xs font-medium text-gray-500">{f.label}</span>
+                  {!f.isVisibleToEmployee && <EyeOff size={9} className="text-amber-400" />}
+                </div>
+                <FieldDisplay value={getCfValue(f.id)} fieldType={f.fieldType} />
+              </div>
+            ))}
+            {filledFields.length === 0 && (
+              <p className="col-span-3 text-xs text-gray-400 py-2">No custom field values set yet. Click Edit to fill them in.</p>
+            )}
+          </div>
+          {/* Core context strip */}
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+            {employee.city && <span className="flex items-center gap-1"><MapPin size={11} />{employee.city}</span>}
+            {level         && <span className="flex items-center gap-1"><GitBranch size={11} />{level.name}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function OrgEmployees() {
+  const [refresh,      setRefresh]      = useState(0);
+  const [search,       setSearch]       = useState('');
+  const [levelFilter,  setLevelFilter]  = useState('');
+  const [statusFilter, setStatusFilter] = useState('active');
+  const [formTarget,   setFormTarget]   = useState(null); // null=closed, {}=create, emp=edit
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [toast,        setToast]        = useState(null);
+
+  const bump = () => setRefresh(r => r + 1);
+  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
+
+  // Data — re-read on every refresh tick
+  const employees    = useMemo(() => getOrgEmployees(),  [refresh]); // eslint-disable-line
+  const levels       = useMemo(() => getHierarchyLevels(), [refresh]); // eslint-disable-line
+  const customFields = useMemo(() => getCustomFields().filter(f => f.status === 'active'), [refresh]); // eslint-disable-line
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return employees.filter(emp => {
+      const matchSearch = !q
+        || emp.name?.toLowerCase().includes(q)
+        || emp.email?.toLowerCase().includes(q)
+        || emp.city?.toLowerCase().includes(q)
+        || emp.division?.toLowerCase().includes(q);
+      const matchLevel  = !levelFilter  || emp.levelId  === levelFilter;
+      const matchStatus = !statusFilter || statusFilter === 'all' || emp.status === statusFilter;
+      return matchSearch && matchLevel && matchStatus;
+    });
+  }, [employees, search, levelFilter, statusFilter]);
+
+  const handleDelete = () => {
+    deleteOrgEmployee(deleteTarget.id);
+    setDeleteTarget(null);
+    showToast('Employee deleted.');
+    bump();
+  };
+
+  const handleSaved = (msg) => {
+    setFormTarget(null);
+    showToast(msg);
+    bump();
+  };
+
+  const activeCount   = employees.filter(e => e.status === 'active').length;
+  const inactiveCount = employees.filter(e => e.status !== 'active').length;
+  const withPosition  = employees.filter(e => !!getEmployeePrimaryPosition(e.id)).length;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Employees</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Manage org employees, hierarchy assignments, and custom profile fields.
+          </p>
+        </div>
+        <button
+          onClick={() => setFormTarget({})}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm hover:opacity-90"
+          style={{ background: '#01A2B1' }}>
+          <Plus size={16} /> Add Employee
+        </button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: 'Total',          value: employees.length, color: '#01A2B1' },
+          { label: 'Active',         value: activeCount,      color: '#059669' },
+          { label: 'Inactive',       value: inactiveCount,    color: '#9CA3AF' },
+          { label: 'With Position',  value: withPosition,     color: '#7C3AED' },
+        ].map(s => (
+          <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: s.color + '18' }}>
+              <Users size={16} style={{ color: s.color }} />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-gray-800">{s.value}</div>
+              <div className="text-xs text-gray-500">{s.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            placeholder="Search by name, email, city, division…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#01A2B1]/20 focus:border-[#01A2B1] bg-white"
+          />
+        </div>
+        <select value={levelFilter} onChange={e => setLevelFilter(e.target.value)}
+          className="px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none bg-white">
+          <option value="">All Levels</option>
+          {levels.map(l => <option key={l.id} value={l.id}>{l.name} ({l.abbreviation})</option>)}
+        </select>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="px-3.5 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none bg-white">
+          <option value="all">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+
+      {/* Employee list */}
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-xl border border-dashed border-gray-300 py-16 text-center text-gray-400">
+          <Users size={36} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">
+            {employees.length === 0
+              ? 'No employees yet. Click "Add Employee" to create one.'
+              : 'No employees match your search/filter.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map(emp => (
+            <EmployeeCard
+              key={emp.id}
+              employee={emp}
+              levels={levels}
+              customFields={customFields}
+              onEdit={() => setFormTarget(emp)}
+              onDelete={() => setDeleteTarget(emp)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="text-xs text-gray-400 text-right">
+        Showing {filtered.length} of {employees.length} employees
+      </div>
+
+      {/* Modals */}
+      {formTarget !== null && (
+        <EmployeeModal
+          employee={formTarget?.id ? formTarget : null}
+          levels={levels}
+          customFields={customFields}
+          onClose={() => setFormTarget(null)}
+          onSaved={handleSaved}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteConfirm
+          employee={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
+      )}
+      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+    </div>
+  );
+}

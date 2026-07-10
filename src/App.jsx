@@ -29,6 +29,25 @@ import AdminCompanies from './pages/AdminCompanies';
 // Company Admin pages
 import CompanyDashboard from './pages/CompanyDashboard';
 
+// Org config pages
+import HierarchyLevels from './pages/HierarchyLevels';
+import ReportingLines from './pages/ReportingLines';
+import OrgChart from './pages/OrgChart';
+import OrgUnits from './pages/OrgUnits';
+import PositionMaster from './pages/PositionMaster';
+import PositionOccupancy from './pages/PositionOccupancy';
+import CustomFieldBuilder from './pages/CustomFieldBuilder';
+import AutoAssignmentRules from './pages/AutoAssignmentRules';
+import OrgEmployees from './pages/OrgEmployees';
+
+// KPI & Training pages
+import KPIDashboard from './pages/KPIDashboard';
+import KPIScorecard from './pages/KPIScorecard';
+import KPILibrary from './pages/KPILibrary';
+import KPITemplateBuilder from './pages/KPITemplateBuilder';
+import TrainingDashboard from './pages/TrainingDashboard';
+import TrainingMyModules from './pages/TrainingMyModules';
+
 // Default pages per role
 const DEFAULT_PAGE = {
   employee:      'emp-dashboard',
@@ -81,6 +100,7 @@ function AppRouter() {
         {page === 'emp-assessment'  && <SelfAssessment  onNavigate={navigate} />}
         {page === 'emp-assignments' && <EmpAssignments  onNavigate={navigate} />}
         {page === 'emp-nominations' && <EmpNominations  onNavigate={navigate} />}
+        {page === 'emp-training'    && <TrainingMyModules />}
       </Layout>
     );
   }
@@ -111,11 +131,25 @@ function AppRouter() {
       <Layout page={page} onNavigate={navigate}>
         {page === 'adm-dashboard' && <AdminDashboard onNavigate={navigate} />}
         {page === 'adm-companies' && <AdminCompanies />}
-        {page === 'adm-employees' && <AdminEmployees />}
+        {page === 'adm-employees' && <OrgEmployees />}
+        {page === 'adm-supabase-employees' && <AdminEmployees />}
         {page === 'adm-profiles'  && <AdminProfiles />}
         {page === 'adm-progress'  && <AdminProgress />}
         {page === 'adm-templates' && <AdminTemplates />}
         {page === 'adm-export'    && <AdminExport />}
+        {page === 'adm-kpis'        && <KPIDashboard      onNavigate={navigate} />}
+        {page === 'adm-kpi-sc'      && <KPIScorecard       onNavigate={navigate} />}
+        {page === 'adm-kpi-lib'     && <KPILibrary          onNavigate={navigate} />}
+        {page === 'adm-kpi-builder' && <KPITemplateBuilder  onNavigate={navigate} />}
+        {page === 'adm-training'    && <TrainingDashboard />}
+        {page === 'adm-org-chart'    && <OrgChart />}
+        {page === 'adm-hier-levels'  && <HierarchyLevels />}
+        {page === 'adm-rep-lines'    && <ReportingLines />}
+        {page === 'adm-org-units'    && <OrgUnits />}
+        {page === 'adm-positions'    && <PositionMaster />}
+        {page === 'adm-occupancy'    && <PositionOccupancy />}
+        {page === 'adm-custom-fields'&& <CustomFieldBuilder />}
+        {page === 'adm-auto-rules'   && <AutoAssignmentRules />}
       </Layout>
     );
   }
@@ -125,6 +159,9 @@ function AppRouter() {
     return (
       <Layout page={page} onNavigate={navigate}>
         {page === 'co-dashboard' && <CompanyDashboard />}
+        {page === 'co-kpis'      && <KPIDashboard onNavigate={navigate} />}
+        {page === 'co-kpi-sc'    && <KPIScorecard  onNavigate={navigate} />}
+        {page === 'co-training'  && <TrainingDashboard />}
       </Layout>
     );
   }

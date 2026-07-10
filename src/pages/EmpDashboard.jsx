@@ -82,7 +82,7 @@ export default function EmpDashboard({ onNavigate }) {
     <div>
       <div className="mb-6">
         <h1 className="text-xl font-bold text-gray-900">Welcome back, {currentUser.name?.split(' ')[0]}!</h1>
-        <p className="text-sm text-gray-500 mt-1">Track your 360° assessment progress below.</p>
+        <p className="text-sm text-gray-500 mt-1">Track your assessment progress on OPTEM ACUITY below.</p>
       </div>
 
       {!employee && (

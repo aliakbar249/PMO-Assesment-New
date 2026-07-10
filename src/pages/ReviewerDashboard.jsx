@@ -117,7 +117,7 @@ export default function ReviewerDashboard({ onNavigate, onSelectReviewer }) {
   if (reviewers.length === 0) {
     return (
       <>
-        <PageHeader title="Reviewer Dashboard" subtitle="You have been invited to provide 360° assessments." />
+        <PageHeader title="Reviewer Dashboard" subtitle="You have been invited to provide assessments on OPTEM ACUITY." />
         <Alert type="warning">No employee linked to your reviewer account. Please contact the administrator.</Alert>
       </>
     );

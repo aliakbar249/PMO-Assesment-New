@@ -28,7 +28,7 @@ export default function AdminDashboard({ onNavigate }) {
 
   return (
     <div>
-      <PageHeader title="Administrator Dashboard" subtitle="Monitor 360° assessment activity across all employees." />
+      <PageHeader title="Administrator Dashboard" subtitle="Monitor assessment activity across all employees on OPTEM ACUITY." />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Employees" value={totalEmp} icon={Users} color="indigo" />

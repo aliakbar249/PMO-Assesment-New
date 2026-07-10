@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Star, ArrowLeft, CheckCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle } from 'lucide-react';
 import { registerEmployee } from '../lib/supabase';
 import { useApp } from '../store/AppContext';
 import { Button, Input, Select, Alert } from '../components/UI';
@@ -75,15 +75,13 @@ export default function RegisterPage({ onBack }) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4" style={{background: 'linear-gradient(135deg, #f8f6f0 0%, #eee8d8 40%, #e8e0cc 100%)'}}>
       <div className="w-full max-w-lg">
         {/* Brand */}
         <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-gradient-to-br from-indigo-400 to-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
-            <Star size={24} className="text-white" />
-          </div>
-          <h1 className="text-xl font-bold text-white">Create Employee Account</h1>
-          <p className="text-indigo-300 text-sm mt-1">360° Power Skills Assessment</p>
+          <h1 className="text-4xl font-bold tracking-tight" style={{color: '#1e2d4a'}}>OPTEM ACUITY</h1>
+          <p className="text-base font-semibold mt-2" style={{color: '#8a7340'}}>Field Force Effectiveness & Efficiency Evaluation Platform</p>
+          <p className="text-sm font-medium mt-1" style={{color: '#4a5568'}}>Create Employee Account</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl p-8">
@@ -147,6 +145,11 @@ export default function RegisterPage({ onBack }) {
               </div>
             </div>
           )}
+        </div>
+        {/* Powered by — below card */}
+        <div className="flex items-center justify-center gap-2 mt-6">
+          <span className="text-xs font-medium" style={{color: '#8a7340'}}>Powered by</span>
+          <img src="/optem-logo.png" alt="Optem Consulting" className="h-6 object-contain" />
         </div>
       </div>
     </div>

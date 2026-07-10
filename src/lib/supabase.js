@@ -81,7 +81,7 @@ export async function initDb() {
     await supabase.from('assessment_templates').insert({
       id: defaultTemplateId,
       name: 'Standard Assessment',
-      description: 'Default 360° Power Skills assessment for all employees',
+      description: 'Default OPTEM ACUITY assessment for all employees',
       is_default: true,
       target_levels: [],
       target_departments: [],

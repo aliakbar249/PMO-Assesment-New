@@ -6,6 +6,7 @@ import {
   adminCreateReviewer, adminResetPassword, adminSetPassword,
   getUserByNominationId, getReviewerSubmittedResults
 } from '../lib/supabase';
+import { getOrgEmployees, getHierarchyLevels } from '../lib/orgDb';
 import { Button, Card, Badge, Input, Select, Alert, Modal, PageHeader, EmptyState } from '../components/UI';
 import {
   CheckCircle, X, Edit3, ChevronDown, ChevronUp, Shield,
@@ -36,8 +37,27 @@ function CreateReviewerModal({ onSave, onClose }) {
   const [copied, setCopied]   = useState(false);
 
   useEffect(() => {
-    getAllEmployees().then(emps => {
-      setEmployees(emps || []);
+    // Load both Supabase employees and org (localStorage) employees, merge them
+    getAllEmployees().then(supabaseEmps => {
+      const supaEmps = supabaseEmps || [];
+      // Map org employees to the same display shape
+      const orgEmps = getOrgEmployees();
+      const levels  = getHierarchyLevels();
+      const levelMap = Object.fromEntries(levels.map(l => [l.id, l.abbreviation || l.name]));
+      // Build a set of emails already in Supabase to avoid duplicates
+      const supaEmails = new Set(supaEmps.map(e => (e.email || '').toLowerCase()));
+      const orgMapped = orgEmps
+        .filter(e => e.status !== 'inactive')
+        .filter(e => !supaEmails.has((e.email || '').toLowerCase()))
+        .map(e => ({
+          id:         e.id,
+          name:       e.name,
+          email:      e.email || '',
+          jobTitle:   levelMap[e.levelId] || e.levelId || '',
+          department: e.city || '',
+          _source:    'org',
+        }));
+      setEmployees([...supaEmps, ...orgMapped]);
       setLoadingEmps(false);
     });
   }, []);
@@ -192,6 +212,7 @@ function CreateReviewerModal({ onSave, onClose }) {
           ) : (
             filteredEmployees.map((emp, idx) => {
               const checked = selectedIds.includes(emp.id);
+              const isOrg   = emp._source === 'org';
               return (
                 <label key={emp.id}
                   className={`flex items-center gap-3 px-3.5 py-2.5 cursor-pointer transition-colors
@@ -199,7 +220,7 @@ function CreateReviewerModal({ onSave, onClose }) {
                     ${idx !== filteredEmployees.length - 1 ? 'border-b border-gray-100' : ''}`}>
                   <input type="checkbox" checked={checked} onChange={() => toggleEmployee(emp.id)}
                     className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0" />
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-gray-900 truncate">{emp.name}</p>
                     {(emp.jobTitle || emp.department) && (
                       <p className="text-xs text-gray-500 truncate">
@@ -207,6 +228,11 @@ function CreateReviewerModal({ onSave, onClose }) {
                       </p>
                     )}
                   </div>
+                  {isOrg && (
+                    <span className="ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-600 border border-violet-200">
+                      Org
+                    </span>
+                  )}
                 </label>
               );
             })
