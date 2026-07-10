@@ -629,16 +629,20 @@ export async function adminCreateReviewer(profile) {
   }
 
   // ── Create one nomination + reviewer row per employee ─────────
+  // categoryMap: { [empId]: category } — allows per-employee category override.
+  // Falls back to profile.category (global) if not set for a specific employee.
+  const categoryMap = profile.categoryMap || {};
   const failedEmployeeIds = [];
   for (const empId of employeeIds) {
     const nomId = genId();
     const revId = genId();
+    const resolvedCategory = categoryMap[empId] || profile.category || 'peer';
 
     const { error: ne } = await supabase.from('nominations').insert({
       id: nomId,
       employee_id: empId,
       assignment_id: profile.assignmentId || null,
-      reviewer_type: profile.category || 'peer',
+      reviewer_type: resolvedCategory,
       name: profile.name,
       role: profile.role || null,
       department: profile.department || null,
