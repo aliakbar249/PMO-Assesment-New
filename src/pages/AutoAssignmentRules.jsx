@@ -7,7 +7,7 @@ import {
   RULE_OPERATORS, RULE_ACTION_TYPES, RULE_TRIGGERS,
 } from '../lib/orgDb';
 import { getKPITemplates, getTrainingModules } from '../lib/kpiTraining';
-import { getAssessmentTemplates } from '../lib/supabase';
+import { getAssessmentTemplatesSimple } from '../lib/supabase';
 import { getAssessmentTemplates as getAssessmentTemplatesLocal } from '../store/db';
 import {
   Plus, Edit2, Trash2, CheckCircle, AlertTriangle, X, ChevronDown, ChevronRight,
@@ -152,9 +152,8 @@ function ActionRow({ action, index, onChange, onRemove, entityLists }) {
   const hasType = !!action.type;
 
   const handleTypeChange = (e) => {
-    // Change type AND clear entityId in one update
-    onChange(index, 'type',     e.target.value);
-    onChange(index, 'entityId', '');
+    // Single call — changeAction handles clearing entityId when key==='type'
+    onChange(index, 'type', e.target.value);
   };
 
   return (
@@ -339,12 +338,13 @@ function RuleFormModal({ rule, allRules, fields, levels, onClose, onSaved }) {
     setLoadingEntities(false); // Show dropdowns immediately with whatever is available
 
     // ── Step 2: enrich assessment templates from Supabase (async, non-blocking)
-    getAssessmentTemplates()
+    // Uses the lightweight version (id+name only) — no sections join, no second round-trip.
+    getAssessmentTemplatesSimple()
       .then(supabaseTemplates => {
-        const merged = supabaseTemplates && supabaseTemplates.length > 0
-          ? supabaseTemplates
-          : localAssessmentTemplates; // keep local if Supabase returns empty
-        setEntityLists(prev => ({ ...prev, assessmentTemplates: merged }));
+        if (supabaseTemplates && supabaseTemplates.length > 0) {
+          setEntityLists(prev => ({ ...prev, assessmentTemplates: supabaseTemplates }));
+        }
+        // If Supabase returns empty, keep whatever localAssessmentTemplates provided
       })
       .catch(() => {
         // Supabase failed — local fallback already set above, nothing more to do

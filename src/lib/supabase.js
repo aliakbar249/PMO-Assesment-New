@@ -1061,6 +1061,28 @@ export async function getAssessmentTemplates() {
   });
 }
 
+// ── Lightweight version: only id + name + description — no sections join ──────
+// Use this wherever you only need to list templates (e.g. dropdowns).
+// Much faster than getAssessmentTemplates() which does two Supabase round-trips.
+export async function getAssessmentTemplatesSimple() {
+  const { data, error } = await supabase
+    .from('assessment_templates')
+    .select('id, name, description, is_default, active')
+    .neq('active', false)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.warn('getAssessmentTemplatesSimple error:', error.message);
+    return [];
+  }
+  return (data || []).map(t => ({
+    id:          t.id,
+    name:        t.name,
+    description: t.description,
+    isDefault:   t.is_default,
+  }));
+}
+
 export async function saveAssessmentTemplates(templates) {
   if (!templates || templates.length === 0) return { success: false, error: 'No templates provided' };
 
