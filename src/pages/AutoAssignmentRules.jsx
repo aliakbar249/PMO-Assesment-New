@@ -8,6 +8,7 @@ import {
 } from '../lib/orgDb';
 import { getKPITemplates, getTrainingModules } from '../lib/kpiTraining';
 import { getAssessmentTemplates } from '../lib/supabase';
+import { getAssessmentTemplates as getAssessmentTemplatesLocal } from '../store/db';
 import {
   Plus, Edit2, Trash2, CheckCircle, AlertTriangle, X, ChevronDown, ChevronRight,
   Zap, ToggleLeft, ToggleRight, Play, ArrowUp, ArrowDown, Settings,
@@ -323,21 +324,31 @@ function RuleFormModal({ rule, allRules, fields, levels, onClose, onSaved }) {
   const [loadingEntities, setLoadingEntities] = useState(true);
 
   useEffect(() => {
-    // KPI templates + training modules are synchronous (localStorage)
-    const kpiTemplates   = getKPITemplates()   || [];
+    // ── Step 1: set KPI + training immediately (both are synchronous localStorage reads)
+    const kpiTemplates    = getKPITemplates()    || [];
     const trainingModules = getTrainingModules() || [];
-    // Assessment templates are async (Supabase)
-    getAssessmentTemplates().then(assessmentTemplates => {
-      setEntityLists({
-        assessmentTemplates: assessmentTemplates || [],
-        kpiTemplates,
-        trainingModules,
-      });
-      setLoadingEntities(false);
-    }).catch(() => {
-      setEntityLists({ assessmentTemplates: [], kpiTemplates, trainingModules });
-      setLoadingEntities(false);
+
+    // Also grab localStorage assessment templates as an instant fallback
+    const localAssessmentTemplates = getAssessmentTemplatesLocal() || [];
+
+    setEntityLists({
+      assessmentTemplates: localAssessmentTemplates,
+      kpiTemplates,
+      trainingModules,
     });
+    setLoadingEntities(false); // Show dropdowns immediately with whatever is available
+
+    // ── Step 2: enrich assessment templates from Supabase (async, non-blocking)
+    getAssessmentTemplates()
+      .then(supabaseTemplates => {
+        const merged = supabaseTemplates && supabaseTemplates.length > 0
+          ? supabaseTemplates
+          : localAssessmentTemplates; // keep local if Supabase returns empty
+        setEntityLists(prev => ({ ...prev, assessmentTemplates: merged }));
+      })
+      .catch(() => {
+        // Supabase failed — local fallback already set above, nothing more to do
+      });
   }, []);
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(er => ({ ...er, [k]: '' })); };
