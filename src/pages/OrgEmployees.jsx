@@ -932,6 +932,7 @@ function DeleteConfirm({ employee, onClose, onConfirm }) {
 // ─── Employee Row Card ────────────────────────────────────────────────────────
 function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActions }) {
   const [expanded, setExpanded] = useState(false);
+  const isSupabase = employee._source === 'supabase';
   const level = levels.find(l => l.id === employee.levelId);
   const primaryPos = getEmployeePrimaryPosition(employee.id);
   const cfValues = getCustomFieldValues(employee.id);
@@ -964,11 +965,15 @@ function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActi
             <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${employee.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
               {employee.status === 'active' ? 'Active' : 'Inactive'}
             </span>
-            {level && (
+            {level ? (
               <span className="px-1.5 py-0.5 rounded-full text-xs font-medium text-white" style={{ background: level.colorTag || '#6B7280' }}>
                 {level.abbreviation}
               </span>
-            )}
+            ) : employee.levelText ? (
+              <span className="px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
+                {employee.levelText}
+              </span>
+            ) : null}
             {employee.organization && (
               <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
                 <Building2 size={9} />{employee.organization}
@@ -1007,14 +1012,18 @@ function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActi
             className="p-1.5 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors">
             <Settings size={14} />
           </button>
-          <button onClick={onEdit}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-[#01A2B1] hover:bg-[#01A2B1]/10 transition-colors">
-            <Edit2 size={14} />
-          </button>
-          <button onClick={onDelete}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
-            <Trash2 size={14} />
-          </button>
+          {!isSupabase && (
+            <button onClick={onEdit}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-[#01A2B1] hover:bg-[#01A2B1]/10 transition-colors">
+              <Edit2 size={14} />
+            </button>
+          )}
+          {!isSupabase && (
+            <button onClick={onDelete}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+              <Trash2 size={14} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1060,6 +1069,7 @@ export default function OrgEmployees() {
   const [companyAdmins,       setCompanyAdmins]       = useState([]);
   const [adminSectionOpen,    setAdminSectionOpen]    = useState(false);
   const [createAdminModal,    setCreateAdminModal]    = useState(false);
+  const [supabaseEmps,        setSupabaseEmps]        = useState([]);
 
   const bump = () => setRefresh(r => r + 1);
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
@@ -1068,6 +1078,8 @@ export default function OrgEmployees() {
   useEffect(() => {
     getCompanies().then(cos => setCompanies((cos || []).filter(c => c.active)));
     getAllCompanyAdmins().then(admins => setCompanyAdmins(admins || []));
+    // Pull Supabase employees so they appear in the listing alongside localStorage ones
+    getAllEmployees().then(emps => setSupabaseEmps(emps || []));
 
     // One-time purge: remove legacy seed employees that still exist in localStorage.
     // Seed records are identifiable by their @optem.com email — these were never
@@ -1081,7 +1093,28 @@ export default function OrgEmployees() {
   }, []); // eslint-disable-line
 
   // Data — re-read on every refresh tick
-  const employees    = useMemo(() => getOrgEmployees(),  [refresh]); // eslint-disable-line
+  const orgEmployees = useMemo(() => getOrgEmployees(), [refresh]); // eslint-disable-line
+
+  // Merge: Supabase employees first, then localStorage employees that aren't already
+  // in Supabase (matched by lowercased email). Supabase employees are read-only
+  // in this view (no edit/delete — they're managed via Supabase).
+  const employees = useMemo(() => {
+    const supaEmails = new Set(supabaseEmps.map(e => (e.email || '').toLowerCase()));
+    const orgOnly = orgEmployees.filter(e => !supaEmails.has((e.email || '').toLowerCase()));
+    // Normalise Supabase employees to the same shape as org employees for display
+    const supaNormalised = supabaseEmps.map(e => ({
+      id:           e.id,
+      name:         e.name,
+      email:        e.email || '',
+      status:       e.status || 'active',
+      levelId:      '',               // Supabase stores level as text, not levelId
+      levelText:    e.level || e.jobTitle || '',
+      organization: e.organization || '',
+      city:         e.location || '',
+      _source:      'supabase',
+    }));
+    return [...supaNormalised, ...orgOnly];
+  }, [supabaseEmps, orgEmployees]); // eslint-disable-line
   const levels       = useMemo(() => getHierarchyLevels(), [refresh]); // eslint-disable-line
   const customFields = useMemo(() => getCustomFields().filter(f => f.status === 'active'), [refresh]); // eslint-disable-line
 
@@ -1092,8 +1125,10 @@ export default function OrgEmployees() {
         || emp.name?.toLowerCase().includes(q)
         || emp.email?.toLowerCase().includes(q)
         || emp.city?.toLowerCase().includes(q)
-        || emp.division?.toLowerCase().includes(q);
-      const matchLevel  = !levelFilter  || emp.levelId  === levelFilter;
+        || emp.division?.toLowerCase().includes(q)
+        || emp.organization?.toLowerCase().includes(q)
+        || emp.levelText?.toLowerCase().includes(q);
+      const matchLevel  = !levelFilter || emp.levelId === levelFilter || (!emp.levelId && !levelFilter);
       const empStatus = emp.status || 'active'; // treat missing status as active
       const matchStatus = !statusFilter || statusFilter === 'all' || empStatus === statusFilter;
       return matchSearch && matchLevel && matchStatus;
@@ -1113,9 +1148,9 @@ export default function OrgEmployees() {
     bump();
   };
 
-  const activeCount   = employees.filter(e => e.status === 'active').length;
-  const inactiveCount = employees.filter(e => e.status !== 'active').length;
-  const withPosition  = employees.filter(e => !!getEmployeePrimaryPosition(e.id)).length;
+  const activeCount   = employees.filter(e => (e.status || 'active') === 'active').length;
+  const inactiveCount = employees.filter(e => (e.status || 'active') !== 'active').length;
+  const withPosition  = employees.filter(e => e._source !== 'supabase' && !!getEmployeePrimaryPosition(e.id)).length;
 
   return (
     <div className="space-y-6">
