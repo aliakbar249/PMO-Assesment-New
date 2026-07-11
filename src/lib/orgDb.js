@@ -73,14 +73,14 @@ const SEED_OCCUPANCIES = [
 
 // ─── Employees (keep IDs + emails stable for auth compatibility) ──────────────
 const SEED_ORG_EMPLOYEES = [
-  { id: 'oemp_tariq',   name: 'Tariq Mahmood',  levelId: 'lvl_nsm', email: 'tariq@optem.com',   city: 'Lahore',    region: 'National', division: 'Primary Care', status: 'active' },
-  { id: 'oemp_sana',    name: 'Sana Iqbal',     levelId: 'lvl_zm',  email: 'sana@optem.com',    city: 'Islamabad', region: 'North',    division: 'Oncology',     status: 'active' },
-  { id: 'oemp_ali',     name: 'Ali Hassan',     levelId: 'lvl_rsm', email: 'ali@optem.com',     city: 'Lahore',    region: 'Central',  division: 'Primary Care', status: 'active' },
-  { id: 'oemp_nadia',   name: 'Nadia Baig',     levelId: 'lvl_asm', email: 'nadia@optem.com',   city: 'Lahore',    region: 'Gulberg',  division: 'Primary Care', status: 'active' },
-  { id: 'oemp_omar',    name: 'Omar Sheikh',    levelId: 'lvl_asm', email: 'omar@optem.com',    city: 'Lahore',    region: 'DHA',      division: 'Oncology',     status: 'active' },
-  { id: 'oemp_sara',    name: 'Sara Mahmood',   levelId: 'lvl_mr',  email: 'sara@optem.com',    city: 'Lahore',    region: 'Central',  division: 'Primary Care', status: 'active' },
-  { id: 'oemp_kamran',  name: 'Kamran Ali',     levelId: 'lvl_mr',  email: 'kamran@optem.com',  city: 'Lahore',    region: 'East',     division: 'Oncology',     status: 'active' },
-  { id: 'oemp_fareeha', name: 'Fareeha Khan',   levelId: 'lvl_smr', email: 'fareeha@optem.com', city: 'Lahore',    region: 'West',     division: 'Primary Care', status: 'active' },
+  { id: 'oemp_tariq',   name: 'Tariq Mahmood',  levelId: 'lvl_nsm', email: 'tariq@optem.com',   city: 'Lahore',    region: 'National', division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
+  { id: 'oemp_sana',    name: 'Sana Iqbal',     levelId: 'lvl_zm',  email: 'sana@optem.com',    city: 'Islamabad', region: 'North',    division: 'Oncology',     status: 'active', organization: 'Optem Consulting' },
+  { id: 'oemp_ali',     name: 'Ali Hassan',     levelId: 'lvl_rsm', email: 'ali@optem.com',     city: 'Lahore',    region: 'Central',  division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
+  { id: 'oemp_nadia',   name: 'Nadia Baig',     levelId: 'lvl_asm', email: 'nadia@optem.com',   city: 'Lahore',    region: 'Gulberg',  division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
+  { id: 'oemp_omar',    name: 'Omar Sheikh',    levelId: 'lvl_asm', email: 'omar@optem.com',    city: 'Lahore',    region: 'DHA',      division: 'Oncology',     status: 'active', organization: 'Optem Consulting' },
+  { id: 'oemp_sara',    name: 'Sara Mahmood',   levelId: 'lvl_mr',  email: 'sara@optem.com',    city: 'Lahore',    region: 'Central',  division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
+  { id: 'oemp_kamran',  name: 'Kamran Ali',     levelId: 'lvl_mr',  email: 'kamran@optem.com',  city: 'Lahore',    region: 'East',     division: 'Oncology',     status: 'active', organization: 'Optem Consulting' },
+  { id: 'oemp_fareeha', name: 'Fareeha Khan',   levelId: 'lvl_smr', email: 'fareeha@optem.com', city: 'Lahore',    region: 'West',     division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
 ];
 
 // ─── Reporting Lines (legacy — kept for backward compatibility, superseded by position model) ───
@@ -227,10 +227,23 @@ function loadOrg() {
       return initial;
     }
     const parsed = JSON.parse(raw);
+
+    // Backfill: if stored employees are missing the `organization` field,
+    // patch them from the seed using the stable employee ID as the key.
+    // This repairs data written before the organization field was introduced.
+    const seedEmpMap = {};
+    SEED_ORG_EMPLOYEES.forEach(e => { seedEmpMap[e.id] = e; });
+    const patchedEmployees = (parsed.orgEmployees || []).map(emp => {
+      if (!emp.organization && seedEmpMap[emp.id]?.organization) {
+        return { ...emp, organization: seedEmpMap[emp.id].organization };
+      }
+      return emp;
+    });
+
     // Backfill pattern — new tables get seeded if missing
     return {
       hierarchyLevels:   parsed.hierarchyLevels   || SEED_HIERARCHY_LEVELS,
-      orgEmployees:      (parsed.orgEmployees?.length > 0 ? parsed.orgEmployees : SEED_ORG_EMPLOYEES),
+      orgEmployees:      (patchedEmployees.length > 0 ? patchedEmployees : SEED_ORG_EMPLOYEES),
       reportingLines:    parsed.reportingLines     || SEED_REPORTING_LINES,
       orgUnits:          parsed.orgUnits           || SEED_ORG_UNITS,
       positions:         parsed.positions          || SEED_POSITIONS,

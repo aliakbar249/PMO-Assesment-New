@@ -1065,18 +1065,13 @@ export default function OrgEmployees() {
   const bump = () => setRefresh(r => r + 1);
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
 
-  // On mount: load companies + company admins + silently remove employees with no organization
+  // On mount: load companies + company admins
+  // NOTE: we intentionally do NOT auto-purge employees that lack an organization —
+  // real employees added before the company field was mandatory must not be silently lost.
+  // The organization field backfill now runs in loadOrg() for seed records.
   useEffect(() => {
     getCompanies().then(cos => setCompanies((cos || []).filter(c => c.active)));
     getAllCompanyAdmins().then(admins => setCompanyAdmins(admins || []));
-
-    // Remove any org employees that have no company assigned — they are incomplete/seed records
-    const all = getOrgEmployees();
-    const toRemove = all.filter(e => !e.organization || !e.organization.trim());
-    if (toRemove.length > 0) {
-      toRemove.forEach(e => deleteOrgEmployee(e.id));
-      bump();
-    }
   }, []); // eslint-disable-line
 
   // Data — re-read on every refresh tick
