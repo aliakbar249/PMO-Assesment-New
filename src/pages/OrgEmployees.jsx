@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   getOrgEmployees, saveOrgEmployee, deleteOrgEmployee,
   getHierarchyLevels,
@@ -7,9 +7,16 @@ import {
   OCCUPANCY_TYPES,
 } from '../lib/orgDb';
 import {
+  getAssessment, getAssignmentsByEmployee, getNominations, getAllReviewers,
+  getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates,
+  getEmployeeTemplateId, adminResetPassword, adminSetPassword,
+  getAllEmployees,
+} from '../lib/supabase';
+import {
   Users, Plus, Edit2, Trash2, Search, X, CheckCircle, AlertTriangle,
   ChevronDown, ChevronRight, EyeOff, GitBranch, Briefcase, Mail,
-  MapPin, Save,
+  MapPin, Save, Settings, KeyRound, Layers, RefreshCw, Lock, Copy,
+  AlertCircle, Star,
 } from 'lucide-react';
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -341,6 +348,422 @@ function EmployeeModal({ employee, levels, customFields, onClose, onSaved }) {
   );
 }
 
+// ─── Employee Actions Modal (Password / Template / Assessment) ──────────────────
+// Looks up the org employee in Supabase by email and provides the same
+// rich management tabs that AdminEmployees.jsx has.
+function EmployeeActionsModal({ orgEmployee, onClose }) {
+  const [tab, setTab] = useState('template');
+
+  // Supabase-side data
+  const [supEmployee,  setSupEmployee]  = useState(null);  // matched Supabase employee row
+  const [linkedUser,   setLinkedUser]   = useState(null);
+  const [assessment,   setAssessment]   = useState(null);
+  const [assignments,  setAssignments]  = useState([]);
+  const [nominations,  setNominations]  = useState(null);
+  const [reviewers,    setReviewers]    = useState([]);
+  const [allTemplates, setAllTemplates] = useState([]);
+  const [selectedTmpl, setSelectedTmpl] = useState('');
+  const [loading,      setLoading]      = useState(true);
+  const [notLinked,    setNotLinked]    = useState(false);
+
+  // Template tab state
+  const [tmplSaving, setTmplSaving] = useState(false);
+  const [tmplSaved,  setTmplSaved]  = useState(false);
+  const [tmplError,  setTmplError]  = useState('');
+
+  // Password tab state
+  const [pwMode,   setPwMode]   = useState('reset');
+  const [newPw,    setNewPw]    = useState('');
+  const [confPw,   setConfPw]   = useState('');
+  const [pwError,  setPwError]  = useState('');
+  const [pwResult, setPwResult] = useState(null);
+  const [pwSaving, setPwSaving] = useState(false);
+  const [copied,   setCopied]   = useState(false);
+
+  useEffect(() => {
+    // Match org employee to Supabase employee by email
+    getAllEmployees().then(allEmps => {
+      const matched = (allEmps || []).find(
+        e => e.email?.toLowerCase() === orgEmployee.email?.toLowerCase()
+      );
+      if (!matched) {
+        setNotLinked(true);
+        setLoading(false);
+        return;
+      }
+      setSupEmployee(matched);
+      return Promise.all([
+        getAssessment(matched.id),
+        getAssignmentsByEmployee(matched.id),
+        getNominations(matched.id),
+        getAllReviewers(),
+        getUserByEmployeeId(matched.id),
+        getAssessmentTemplates(),
+        getEmployeeTemplateId(matched.id),
+      ]);
+    }).then(results => {
+      if (!results) return; // notLinked path
+      const [a, asgns, noms, revs, usr, tmpls, currentTmplId] = results;
+      setAssessment(a);
+      setAssignments(asgns || []);
+      setNominations(noms);
+      setReviewers((revs || []).filter(r => r.employeeId === results[0]?.id || r.employeeId));
+      setLinkedUser(usr);
+      setAllTemplates(tmpls || []);
+      setSelectedTmpl(currentTmplId || '');
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [orgEmployee.email]);
+
+  // Re-filter reviewers once supEmployee is known
+  const filteredReviewers = supEmployee
+    ? reviewers.filter(r => r.employeeId === supEmployee.id)
+    : [];
+  const approvedRevs = filteredReviewers.filter(r => r.approvalStatus === 'approved');
+  const pendingRevs  = filteredReviewers.filter(r => r.approvalStatus === 'pending');
+  const currentTemplate = allTemplates.find(t => t.id === selectedTmpl);
+
+  const handleAssignTemplate = async () => {
+    if (!supEmployee) return;
+    setTmplSaving(true); setTmplError('');
+    const res = await assignTemplateToEmployee(supEmployee.id, selectedTmpl || null);
+    setTmplSaving(false);
+    if (!res.success) {
+      setTmplError(res.error === 'MISSING_TABLE' ? '__MISSING_TABLE__' : (res.error || 'Failed to assign template.'));
+      return;
+    }
+    setTmplSaved(true);
+    setTimeout(() => setTmplSaved(false), 3000);
+  };
+
+  const handleResetPw = async () => {
+    if (!linkedUser) return;
+    setPwSaving(true);
+    const res = await adminResetPassword(linkedUser.id);
+    setPwSaving(false);
+    setPwResult({ tempPassword: res.tempPassword });
+  };
+
+  const handleSetPw = async () => {
+    if (newPw.length < 6) { setPwError('Minimum 6 characters.'); return; }
+    if (newPw !== confPw)  { setPwError('Passwords do not match.'); return; }
+    setPwSaving(true);
+    await adminSetPassword(linkedUser.id, newPw);
+    setPwSaving(false);
+    setPwResult({ message: 'Password updated successfully.' });
+  };
+
+  const copyText = (v) => {
+    navigator.clipboard?.writeText(v).catch(() => {});
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  };
+
+  const TABS = [
+    { key: 'template',   label: 'Template'   },
+    { key: 'assessment', label: 'Assessment' },
+    { key: 'password',   label: 'Password'   },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col max-h-[94vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+              <Settings size={16} className="text-[#01A2B1]" />
+              {orgEmployee.name} — Admin Actions
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">{orgEmployee.email}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+        </div>
+
+        {/* Tab bar */}
+        <div className="flex gap-1 px-6 py-3 border-b border-gray-100 bg-gray-50 flex-shrink-0">
+          {TABS.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all
+                ${tab === t.key ? 'bg-white text-[#01A2B1] shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 px-6 py-5">
+          {loading ? (
+            <div className="text-center py-10 text-sm text-gray-400">Loading…</div>
+          ) : notLinked ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-center">
+              <AlertCircle size={28} className="mx-auto mb-2 text-amber-500" />
+              <p className="text-sm font-semibold text-amber-800 mb-1">No Supabase account linked</p>
+              <p className="text-xs text-amber-600">
+                This org employee (<strong>{orgEmployee.email}</strong>) has no matching record in the
+                Supabase employees table. Create a Supabase employee with the same email
+                in <em>Supabase Employees</em> to enable password management and template assignment.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* ── Template Tab ── */}
+              {tab === 'template' && (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-xl p-3">
+                    Choose which assessment template this employee will use. Leaving it blank applies the default template.
+                  </p>
+
+                  {tmplSaved && (
+                    <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                      <CheckCircle size={14} />Template assigned successfully.
+                    </div>
+                  )}
+
+                  {tmplError === '__MISSING_TABLE__' ? (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-2">
+                      <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5"><AlertCircle size={13} />Database migration required</p>
+                      <p className="text-xs text-amber-700">The <code>employee_template_assignments</code> table doesn't exist. Run the SQL shown in the Supabase Employees page to create it.</p>
+                    </div>
+                  ) : tmplError ? (
+                    <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{tmplError}</div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    {/* Default option */}
+                    <label className={`flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all
+                      ${!selectedTmpl ? 'border-[#01A2B1] bg-[#01A2B1]/5' : 'border-gray-200 hover:border-gray-300'}`}>
+                      <input type="radio" name="tmpl" value="" checked={!selectedTmpl}
+                        onChange={() => setSelectedTmpl('')} className="mt-0.5 accent-[#01A2B1]" />
+                      <div>
+                        <div className="text-sm font-semibold text-gray-800">Standard Assessment</div>
+                        <p className="text-xs text-gray-400 mt-0.5">Default — applies to all employees unless overridden.</p>
+                      </div>
+                    </label>
+
+                    {/* Custom templates */}
+                    {allTemplates.filter(t => !t.isDefault).map(tmpl => (
+                      <label key={tmpl.id} className={`flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all
+                        ${selectedTmpl === tmpl.id ? 'border-[#01A2B1] bg-[#01A2B1]/5' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <input type="radio" name="tmpl" value={tmpl.id} checked={selectedTmpl === tmpl.id}
+                          onChange={() => setSelectedTmpl(tmpl.id)} className="mt-0.5 accent-[#01A2B1]" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold text-gray-800 flex items-center gap-2 flex-wrap">
+                            {tmpl.name}
+                            <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full">
+                              {tmpl.sectionIds?.length || 0} sections
+                            </span>
+                          </div>
+                          {tmpl.description && <p className="text-xs text-gray-400 mt-0.5">{tmpl.description}</p>}
+                        </div>
+                      </label>
+                    ))}
+
+                    {allTemplates.filter(t => !t.isDefault).length === 0 && (
+                      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                        No custom templates yet. Go to <strong>Templates → Assessment Templates</strong> to create one.
+                      </p>
+                    )}
+                  </div>
+
+                  {selectedTmpl && currentTemplate && (
+                    <p className="text-xs text-gray-500 bg-gray-50 rounded-xl px-3 py-2">
+                      <Layers size={11} className="inline mr-1 text-[#01A2B1]" />
+                      Selected: <strong>{currentTemplate.name}</strong>
+                    </p>
+                  )}
+
+                  <div className="flex justify-end">
+                    <button onClick={handleAssignTemplate} disabled={tmplSaving}
+                      className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                      style={{ background: '#01A2B1' }}>
+                      <CheckCircle size={14} />{tmplSaving ? 'Saving…' : 'Assign Template'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Assessment Tab ── */}
+              {tab === 'assessment' && (
+                <div className="space-y-3">
+                  {/* Self-assessment */}
+                  <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-semibold text-indigo-800">Self-Assessment</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium
+                        ${assessment?.status === 'submitted' ? 'bg-emerald-100 text-emerald-700'
+                          : assessment ? 'bg-amber-100 text-amber-700'
+                          : 'bg-gray-100 text-gray-500'}`}>
+                        {assessment?.status === 'submitted' ? 'Submitted' : assessment ? 'In Progress' : 'Not Started'}
+                      </span>
+                    </div>
+                    {assessment?.updatedAt && (
+                      <p className="text-xs text-indigo-600">Last updated: {assessment.updatedAt?.substring(0, 10)}</p>
+                    )}
+                  </div>
+
+                  {/* Assignments */}
+                  <div className="p-4 bg-amber-50 rounded-xl border border-amber-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-amber-800">Reviewer Assignments</span>
+                      <span className="px-2 py-0.5 bg-amber-200 text-amber-800 text-xs font-medium rounded-full">{assignments.length} / 3</span>
+                    </div>
+                    {assignments.length > 0
+                      ? assignments.map(a => (
+                        <div key={a.id} className="text-xs text-amber-700 mt-1 flex items-center gap-1">
+                          <Briefcase size={10} />{a.title} · {a.role} · <span className="text-amber-500">{a.status}</span>
+                        </div>
+                      ))
+                      : <p className="text-xs text-amber-600">No reviewer assignments yet.</p>}
+                  </div>
+
+                  {/* Nominations */}
+                  <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-emerald-800">Nominations</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium
+                        ${nominations?.submitted ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-100 text-amber-700'}`}>
+                        {nominations?.submitted ? 'Submitted' : nominations ? 'In Progress' : 'Not Started'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Reviewers */}
+                  <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-blue-800">Reviewers</span>
+                      <div className="flex gap-1.5">
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">{approvedRevs.length} approved</span>
+                        {pendingRevs.length > 0 && (
+                          <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded-full">{pendingRevs.length} pending</span>
+                        )}
+                      </div>
+                    </div>
+                    {filteredReviewers.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {filteredReviewers.map(r => (
+                          <div key={r.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-2.5 py-1.5 border border-blue-100">
+                            <div>
+                              <span className="font-medium text-gray-700">{r.name}</span>
+                              {r.designation && <span className="text-gray-400 ml-1">· {r.designation}</span>}
+                            </div>
+                            <div className="flex gap-1.5">
+                              <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">{r.category}</span>
+                              <span className={`px-1.5 py-0.5 rounded-full text-xs
+                                ${r.approvalStatus === 'approved' ? 'bg-emerald-100 text-emerald-700'
+                                  : r.approvalStatus === 'pending' ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-gray-100 text-gray-500'}`}>
+                                {r.approvalStatus}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-blue-600">No reviewers nominated yet.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Password Tab ── */}
+              {tab === 'password' && (
+                <div className="space-y-4">
+                  {!linkedUser ? (
+                    <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-4">
+                      <AlertCircle size={14} className="inline mr-1" />
+                      No linked user account found for this employee.
+                    </div>
+                  ) : pwResult ? (
+                    <div className="space-y-4">
+                      {pwResult.tempPassword ? (
+                        <>
+                          <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm font-medium">
+                            <CheckCircle size={14} />Temporary password generated
+                          </div>
+                          <div className="flex items-center justify-between bg-amber-50 border-2 border-amber-200 rounded-xl px-4 py-3">
+                            <code className="text-lg font-bold tracking-widest text-amber-800">{pwResult.tempPassword}</code>
+                            <button onClick={() => copyText(pwResult.tempPassword)}
+                              className="text-xs text-indigo-600 flex items-center gap-1 ml-3">
+                              {copied ? <><CheckCircle size={12} />Copied</> : <><Copy size={12} />Copy</>}
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            Share this with <strong>{orgEmployee.name}</strong>. They will be prompted to set a new password on next login.
+                          </p>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm">
+                          <CheckCircle size={14} />{pwResult.message}
+                        </div>
+                      )}
+                      <button onClick={() => { setPwResult(null); setNewPw(''); setConfPw(''); setPwError(''); }}
+                        className="w-full py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">
+                        Change Password Again
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Mode tabs */}
+                      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+                        {[['reset', 'Auto-generate Temp Password'], ['set', 'Set Specific Password']].map(([val, lbl]) => (
+                          <button key={val} onClick={() => { setPwMode(val); setPwError(''); }}
+                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all
+                              ${pwMode === val ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                            {lbl}
+                          </button>
+                        ))}
+                      </div>
+
+                      {pwMode === 'reset' ? (
+                        <div className="space-y-3">
+                          <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-xl p-3">
+                            A secure temporary password will be generated and shown to you. {orgEmployee.name} will need to change it on next login.
+                          </p>
+                          <button onClick={handleResetPw} disabled={pwSaving}
+                            className="w-full py-2.5 rounded-xl text-sm font-medium text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                            style={{ background: '#01A2B1' }}>
+                            <RefreshCw size={14} />{pwSaving ? 'Generating…' : 'Generate Temporary Password'}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {pwError && <p className="text-xs text-red-600">{pwError}</p>}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">New Password</label>
+                            <input type="password" value={newPw} onChange={e => { setNewPw(e.target.value); setPwError(''); }}
+                              placeholder="Min 6 characters"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Confirm Password</label>
+                            <input type="password" value={confPw} onChange={e => { setConfPw(e.target.value); setPwError(''); }}
+                              placeholder="Repeat password"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#01A2B1]" />
+                          </div>
+                          <button onClick={handleSetPw} disabled={pwSaving}
+                            className="w-full py-2.5 rounded-xl text-sm font-medium text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                            style={{ background: '#01A2B1' }}>
+                            <Lock size={14} />{pwSaving ? 'Saving…' : 'Set New Password'}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end px-6 py-4 border-t border-gray-100 bg-gray-50 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-100">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Delete Confirm ───────────────────────────────────────────────────────────
 function DeleteConfirm({ employee, onClose, onConfirm }) {
   const primaryPos = getEmployeePrimaryPosition(employee.id);
@@ -372,7 +795,7 @@ function DeleteConfirm({ employee, onClose, onConfirm }) {
 }
 
 // ─── Employee Row Card ────────────────────────────────────────────────────────
-function EmployeeCard({ employee, levels, customFields, onEdit, onDelete }) {
+function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActions }) {
   const [expanded, setExpanded] = useState(false);
   const level = levels.find(l => l.id === employee.levelId);
   const primaryPos = getEmployeePrimaryPosition(employee.id);
@@ -440,6 +863,10 @@ function EmployeeCard({ employee, levels, customFields, onEdit, onDelete }) {
             className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors">
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </button>
+          <button onClick={onActions} title="Password / Template / Assessment"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors">
+            <Settings size={14} />
+          </button>
           <button onClick={onEdit}
             className="p-1.5 rounded-lg text-gray-400 hover:text-[#01A2B1] hover:bg-[#01A2B1]/10 transition-colors">
             <Edit2 size={14} />
@@ -485,9 +912,10 @@ export default function OrgEmployees() {
   const [search,       setSearch]       = useState('');
   const [levelFilter,  setLevelFilter]  = useState('');
   const [statusFilter, setStatusFilter] = useState('active');
-  const [formTarget,   setFormTarget]   = useState(null); // null=closed, {}=create, emp=edit
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [toast,        setToast]        = useState(null);
+  const [formTarget,    setFormTarget]    = useState(null); // null=closed, {}=create, emp=edit
+  const [deleteTarget,  setDeleteTarget]  = useState(null);
+  const [actionsTarget, setActionsTarget] = useState(null); // employee for actions modal
+  const [toast,         setToast]         = useState(null);
 
   const bump = () => setRefresh(r => r + 1);
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
@@ -610,6 +1038,7 @@ export default function OrgEmployees() {
               customFields={customFields}
               onEdit={() => setFormTarget(emp)}
               onDelete={() => setDeleteTarget(emp)}
+              onActions={() => setActionsTarget(emp)}
             />
           ))}
         </div>
@@ -634,6 +1063,12 @@ export default function OrgEmployees() {
           employee={deleteTarget}
           onClose={() => setDeleteTarget(null)}
           onConfirm={handleDelete}
+        />
+      )}
+      {actionsTarget && (
+        <EmployeeActionsModal
+          orgEmployee={actionsTarget}
+          onClose={() => setActionsTarget(null)}
         />
       )}
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
