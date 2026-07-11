@@ -940,6 +940,65 @@ export async function saveTemplates(templates) {
   }
 }
 
+// ─── Get reviewer_types + reviewer_counts for an employee's assigned template ──
+// Returns: { reviewerTypes: { self, sponsor, peer, team }, reviewerCounts: { sponsor, peer, team } }
+// Falls back to "all types enabled, default counts" if no specific template is assigned.
+export async function getReviewerConfigForEmployee(employee) {
+  const DEFAULT_CONFIG = {
+    reviewerTypes:  { self: true, sponsor: true, peer: true, team: true },
+    reviewerCounts: { sponsor: 1, peer: 3, team: 3 },
+  };
+
+  if (!employee?.id) return DEFAULT_CONFIG;
+
+  try {
+    // Step 1: Check direct assignment
+    const { data: assignment } = await supabase
+      .from('employee_template_assignments')
+      .select('template_id')
+      .eq('employee_id', employee.id)
+      .maybeSingle();
+
+    let templateId = assignment?.template_id || null;
+
+    // Step 2: Level / department auto-matching if no direct assignment
+    if (!templateId && (employee.level || employee.department)) {
+      const { data: templates } = await supabase
+        .from('assessment_templates')
+        .select('id, target_levels, target_departments, reviewer_types, reviewer_counts, is_default')
+        .neq('active', false);
+
+      const matched = (templates || []).find(t => {
+        const levels = t.target_levels || [];
+        const depts  = t.target_departments || [];
+        const levelMatch = levels.length === 0 || levels.includes(employee.level);
+        const deptMatch  = depts.length  === 0 || depts.includes(employee.department);
+        return levelMatch && deptMatch && !t.is_default;
+      });
+
+      if (matched) templateId = matched.id;
+    }
+
+    if (!templateId) return DEFAULT_CONFIG;
+
+    // Step 3: Load reviewer_types + reviewer_counts from the resolved template
+    const { data: tmpl } = await supabase
+      .from('assessment_templates')
+      .select('reviewer_types, reviewer_counts')
+      .eq('id', templateId)
+      .maybeSingle();
+
+    if (!tmpl) return DEFAULT_CONFIG;
+
+    return {
+      reviewerTypes:  tmpl.reviewer_types  || DEFAULT_CONFIG.reviewerTypes,
+      reviewerCounts: tmpl.reviewer_counts || DEFAULT_CONFIG.reviewerCounts,
+    };
+  } catch {
+    return DEFAULT_CONFIG;
+  }
+}
+
 export async function getTemplateForEmployee(employee) {
   if (!employee?.id) return getTemplates();
 

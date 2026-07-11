@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../store/AppContext';
 import {
   getEmployeeByUserId, getAssessment, getAssignmentsByEmployee,
-  getNominations, getTemplateForEmployee, getAssessmentResults
+  getNominations, getTemplateForEmployee, getAssessmentResults,
+  getReviewerConfigForEmployee,
 } from '../lib/supabase';
 import { StatCard, Card, ProgressBar, Badge, Button, Alert } from '../components/UI';
 import { Star, Briefcase, Users, ClipboardList, CheckCircle, Clock, AlertCircle, BarChart2 } from 'lucide-react';
@@ -13,9 +14,10 @@ export default function EmpDashboard({ onNavigate }) {
   const [assessment,  setAssessment]  = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [nominations, setNominations] = useState(null);
-  const [templates,   setTemplates]   = useState([]);
-  const [selfResults, setSelfResults] = useState(null); // section-wise self-avg after submission
-  const [loading,     setLoading]     = useState(true);
+  const [templates,       setTemplates]       = useState([]);
+  const [reviewerConfig,  setReviewerConfig]  = useState(null); // { reviewerTypes, reviewerCounts }
+  const [selfResults,     setSelfResults]     = useState(null); // section-wise self-avg after submission
+  const [loading,         setLoading]         = useState(true);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -23,16 +25,18 @@ export default function EmpDashboard({ onNavigate }) {
     getEmployeeByUserId(currentUser.id).then(async emp => {
       setEmployee(emp);
       if (emp) {
-        const [a, asgns, noms, tpls] = await Promise.all([
+        const [a, asgns, noms, tpls, revCfg] = await Promise.all([
           getAssessment(emp.id),
           getAssignmentsByEmployee(emp.id),
           getNominations(emp.id),
           getTemplateForEmployee(emp),
+          getReviewerConfigForEmployee(emp),
         ]);
         setAssessment(a);
         setAssignments(asgns || []);
         setNominations(noms);
         setTemplates(tpls || []);
+        setReviewerConfig(revCfg);
         // Load self-average results if self-assessment is submitted
         if (a?.status === 'submitted') {
           const res = await getAssessmentResults(emp.id);
@@ -45,6 +49,11 @@ export default function EmpDashboard({ onNavigate }) {
 
   const totalStatements = templates.reduce((s, sec) => s + (sec.statements?.length || 0), 0);
   const ratedStatements = Object.values(assessment?.sections || {}).reduce((s, sec) => s + Object.keys(sec).length, 0);
+
+  // Determine if external reviewers are required by this employee's template.
+  // If the template only has self=true and all others false, skip nomination steps.
+  const rt = reviewerConfig?.reviewerTypes || { self: true, sponsor: true, peer: true, team: true };
+  const needsExternalReviewers = !!(rt.sponsor || rt.peer || rt.team);
 
   const steps = [
     {
@@ -60,18 +69,20 @@ export default function EmpDashboard({ onNavigate }) {
       status: assessment?.status === 'submitted' ? 'Submitted' : assessment ? `${ratedStatements}/${totalStatements} rated` : 'Not started',
       progress: totalStatements > 0 ? Math.round((ratedStatements / totalStatements) * 100) : 0,
     },
-    {
-      id: 'assignments', label: 'Add Assignments', icon: Briefcase,
-      done: assignments.length > 0, nav: 'emp-assignments',
-      badge: assignments.length >= 1 ? 'success' : 'default',
-      status: assignments.length > 0 ? `${assignments.length}/3 added` : 'None added',
-    },
-    {
-      id: 'nominations', label: 'Nominate Reviewers', icon: Users,
-      done: nominations?.submitted, nav: 'emp-nominations',
-      badge: nominations?.submitted ? 'success' : nominations ? 'warning' : 'default',
-      status: nominations?.submitted ? 'Submitted' : nominations ? 'In progress' : 'Not started',
-    },
+    ...(needsExternalReviewers ? [
+      {
+        id: 'assignments', label: 'Add Assignments', icon: Briefcase,
+        done: assignments.length > 0, nav: 'emp-assignments',
+        badge: assignments.length >= 1 ? 'success' : 'default',
+        status: assignments.length > 0 ? `${assignments.length}/3 added` : 'None added',
+      },
+      {
+        id: 'nominations', label: 'Nominate Reviewers', icon: Users,
+        done: nominations?.submitted, nav: 'emp-nominations',
+        badge: nominations?.submitted ? 'success' : nominations ? 'warning' : 'default',
+        status: nominations?.submitted ? 'Submitted' : nominations ? 'In progress' : 'Not started',
+      },
+    ] : []),
   ];
 
   if (loading) {
@@ -95,11 +106,15 @@ export default function EmpDashboard({ onNavigate }) {
       )}
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className={`grid gap-4 mb-6 ${needsExternalReviewers ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2'}`}>
         <StatCard label="Sections Rated" value={`${Object.keys(assessment?.sections || {}).length}/${templates.length}`} icon={Star} color="indigo" />
         <StatCard label="Statements Done" value={`${ratedStatements}/${totalStatements}`} icon={ClipboardList} color="blue" />
-        <StatCard label="Assignments" value={assignments.length} sub="max 3" icon={Briefcase} color="amber" />
-        <StatCard label="Nominations" value={nominations?.submitted ? '✓' : 'Pending'} icon={Users} color={nominations?.submitted ? 'green' : 'red'} />
+        {needsExternalReviewers && (
+          <StatCard label="Assignments" value={assignments.length} sub="max 3" icon={Briefcase} color="amber" />
+        )}
+        {needsExternalReviewers && (
+          <StatCard label="Nominations" value={nominations?.submitted ? '✓' : 'Pending'} icon={Users} color={nominations?.submitted ? 'green' : 'red'} />
+        )}
       </div>
 
       {/* Journey steps */}
@@ -182,8 +197,12 @@ export default function EmpDashboard({ onNavigate }) {
           {[
             'Your responses are saved automatically as you progress — you can return anytime.',
             'Self-assessment requires honest, self-critical reflection. No score is final.',
-            'After you nominate reviewers, an administrator will verify and approve their profiles.',
-            'Approved reviewers will receive access to rate you on the same 4 competency sections.',
+            ...(needsExternalReviewers ? [
+              'After you nominate reviewers, an administrator will verify and approve their profiles.',
+              'Approved reviewers will receive access to rate you on the same competency sections.',
+            ] : [
+              'This assessment is self-only — no external reviewers are required.',
+            ]),
             'All sections must be completed before final submission.',
           ].map((t, i) => (
             <div key={i} className="flex items-start gap-2 text-xs text-gray-600">

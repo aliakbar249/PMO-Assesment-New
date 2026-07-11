@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../store/AppContext';
-import { getEmployeeByUserId, getAssignmentsByEmployee, upsertAssignment, deleteAssignment } from '../lib/supabase';
+import { getEmployeeByUserId, getAssignmentsByEmployee, upsertAssignment, deleteAssignment, getReviewerConfigForEmployee } from '../lib/supabase';
 import { Button, Card, Input, Select, Textarea, Alert, Badge, PageHeader, Modal, EmptyState } from '../components/UI';
 import { Plus, Edit3, Trash2, Briefcase, Save } from 'lucide-react';
 
@@ -92,13 +92,14 @@ function AssignmentForm({ initial, onSave, onCancel }) {
 
 export default function EmpAssignments({ onNavigate }) {
   const { currentUser, tick } = useApp();
-  const [employee, setEmployee] = useState(null);
-  const [assignments, setAssignments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null);
-  const [deleteModal, setDeleteModal] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState('');
+  const [employee,       setEmployee]       = useState(null);
+  const [assignments,    setAssignments]    = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [modal,          setModal]          = useState(null);
+  const [deleteModal,    setDeleteModal]    = useState(null);
+  const [saving,         setSaving]         = useState(false);
+  const [saveError,      setSaveError]      = useState('');
+  const [reviewerConfig, setReviewerConfig] = useState(null);
   const empRef = useRef(null);
 
   useEffect(() => {
@@ -108,8 +109,12 @@ export default function EmpAssignments({ onNavigate }) {
       setEmployee(emp);
       empRef.current = emp;
       if (emp) {
-        const asgns = await getAssignmentsByEmployee(emp.id);
+        const [asgns, revCfg] = await Promise.all([
+          getAssignmentsByEmployee(emp.id),
+          getReviewerConfigForEmployee(emp),
+        ]);
         setAssignments(asgns || []);
+        setReviewerConfig(revCfg);
       }
       setLoading(false);
     });
@@ -223,11 +228,15 @@ export default function EmpAssignments({ onNavigate }) {
         </div>
       )}
 
-      {assignments.length > 0 && (
-        <div className="mt-4 flex justify-end">
-          <Button onClick={() => onNavigate('emp-nominations')}>Continue to Nominate Reviewers →</Button>
-        </div>
-      )}
+      {assignments.length > 0 && (() => {
+        const rt = reviewerConfig?.reviewerTypes;
+        const needsReviewers = !rt || rt.sponsor || rt.peer || rt.team;
+        return needsReviewers ? (
+          <div className="mt-4 flex justify-end">
+            <Button onClick={() => onNavigate('emp-nominations')}>Continue to Nominate Reviewers →</Button>
+          </div>
+        ) : null;
+      })()}
 
       {/* Add/Edit Modal */}
       <Modal open={!!modal} onClose={() => { setModal(null); setSaveError(''); }}
