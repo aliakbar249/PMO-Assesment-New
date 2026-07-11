@@ -10,13 +10,13 @@ import {
   getAssessment, getAssignmentsByEmployee, getNominations, getAllReviewers,
   getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates,
   getEmployeeTemplateId, adminResetPassword, adminSetPassword,
-  getAllEmployees,
+  getAllEmployees, supabase,
 } from '../lib/supabase';
 import {
   Users, Plus, Edit2, Trash2, Search, X, CheckCircle, AlertTriangle,
   ChevronDown, ChevronRight, EyeOff, GitBranch, Briefcase, Mail,
   MapPin, Save, Settings, KeyRound, Layers, RefreshCw, Lock, Copy,
-  AlertCircle, Star,
+  AlertCircle, Star, LinkIcon, Link2Off, Loader2,
 } from 'lucide-react';
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -795,7 +795,7 @@ function DeleteConfirm({ employee, onClose, onConfirm }) {
 }
 
 // ─── Employee Row Card ────────────────────────────────────────────────────────
-function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActions }) {
+function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActions, isLinked }) {
   const [expanded, setExpanded] = useState(false);
   const level = levels.find(l => l.id === employee.levelId);
   const primaryPos = getEmployeePrimaryPosition(employee.id);
@@ -832,6 +832,16 @@ function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActi
             {level && (
               <span className="px-1.5 py-0.5 rounded-full text-xs font-medium text-white" style={{ background: level.colorTag || '#6B7280' }}>
                 {level.abbreviation}
+              </span>
+            )}
+            {isLinked === false && (
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600">
+                <Link2Off size={9} />No Supabase link
+              </span>
+            )}
+            {isLinked === true && (
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-600">
+                <LinkIcon size={9} />Linked
               </span>
             )}
           </div>
@@ -912,18 +922,39 @@ export default function OrgEmployees() {
   const [search,       setSearch]       = useState('');
   const [levelFilter,  setLevelFilter]  = useState('');
   const [statusFilter, setStatusFilter] = useState('active');
-  const [formTarget,    setFormTarget]    = useState(null); // null=closed, {}=create, emp=edit
+  const [formTarget,    setFormTarget]    = useState(null);
   const [deleteTarget,  setDeleteTarget]  = useState(null);
-  const [actionsTarget, setActionsTarget] = useState(null); // employee for actions modal
+  const [actionsTarget, setActionsTarget] = useState(null);
   const [toast,         setToast]         = useState(null);
+
+  // Supabase-linked email set — loaded once on mount
+  const [linkedEmails,     setLinkedEmails]     = useState(null);  // null = still loading
+  const [cleanupConfirm,   setCleanupConfirm]   = useState(false); // show confirm dialog
+  const [cleanupRemoving,  setCleanupRemoving]  = useState(false);
 
   const bump = () => setRefresh(r => r + 1);
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
+
+  // Fetch Supabase employee emails on mount
+  useEffect(() => {
+    getAllEmployees()
+      .then(emps => {
+        const emails = new Set((emps || []).map(e => e.email?.toLowerCase()).filter(Boolean));
+        setLinkedEmails(emails);
+      })
+      .catch(() => setLinkedEmails(new Set())); // fail safe — assume none linked
+  }, []);
 
   // Data — re-read on every refresh tick
   const employees    = useMemo(() => getOrgEmployees(),  [refresh]); // eslint-disable-line
   const levels       = useMemo(() => getHierarchyLevels(), [refresh]); // eslint-disable-line
   const customFields = useMemo(() => getCustomFields().filter(f => f.status === 'active'), [refresh]); // eslint-disable-line
+
+  // Derive linked/unlinked split (only when linkedEmails is ready)
+  const unlinkedEmployees = useMemo(() => {
+    if (!linkedEmails) return [];
+    return employees.filter(e => !linkedEmails.has(e.email?.toLowerCase()));
+  }, [employees, linkedEmails]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -952,9 +983,20 @@ export default function OrgEmployees() {
     bump();
   };
 
+  // Bulk-remove all unlinked employees
+  const handleCleanup = () => {
+    setCleanupRemoving(true);
+    unlinkedEmployees.forEach(e => deleteOrgEmployee(e.id));
+    setCleanupConfirm(false);
+    setCleanupRemoving(false);
+    showToast(`Removed ${unlinkedEmployees.length} unlinked employee${unlinkedEmployees.length !== 1 ? 's' : ''}.`);
+    bump();
+  };
+
   const activeCount   = employees.filter(e => e.status === 'active').length;
   const inactiveCount = employees.filter(e => e.status !== 'active').length;
   const withPosition  = employees.filter(e => !!getEmployeePrimaryPosition(e.id)).length;
+  const linkedCount   = linkedEmails ? employees.filter(e => linkedEmails.has(e.email?.toLowerCase())).length : null;
 
   return (
     <div className="space-y-6">
@@ -966,21 +1008,59 @@ export default function OrgEmployees() {
             Manage org employees, hierarchy assignments, and custom profile fields.
           </p>
         </div>
-        <button
-          onClick={() => setFormTarget({})}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm hover:opacity-90"
-          style={{ background: '#01A2B1' }}>
-          <Plus size={16} /> Add Employee
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Remove unlinked button — only when there are some */}
+          {unlinkedEmployees.length > 0 && (
+            <button
+              onClick={() => setCleanupConfirm(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white bg-red-500 hover:bg-red-600 shadow-sm">
+              <Link2Off size={15} /> Remove {unlinkedEmployees.length} Unlinked
+            </button>
+          )}
+          <button
+            onClick={() => setFormTarget({})}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm hover:opacity-90"
+            style={{ background: '#01A2B1' }}>
+            <Plus size={16} /> Add Employee
+          </button>
+        </div>
       </div>
+
+      {/* Unlinked warning banner */}
+      {linkedEmails && unlinkedEmployees.length > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
+          <Link2Off size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-red-700">
+              {unlinkedEmployees.length} employee{unlinkedEmployees.length !== 1 ? 's have' : ' has'} no Supabase account linked
+            </p>
+            <p className="text-xs text-red-500 mt-0.5">
+              {unlinkedEmployees.map(e => e.name).join(', ')} — their emails don't match any Supabase employee record.
+              Password management, template assignment, and assessment tracking won't work for them.
+            </p>
+          </div>
+          <button
+            onClick={() => setCleanupConfirm(true)}
+            className="flex-shrink-0 px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-medium">
+            Remove All
+          </button>
+        </div>
+      )}
+
+      {/* Loading indicator while Supabase check runs */}
+      {linkedEmails === null && (
+        <div className="flex items-center gap-2 text-xs text-gray-400 px-1">
+          <Loader2 size={13} className="animate-spin" />Checking Supabase links…
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
         {[
-          { label: 'Total',          value: employees.length, color: '#01A2B1' },
-          { label: 'Active',         value: activeCount,      color: '#059669' },
-          { label: 'Inactive',       value: inactiveCount,    color: '#9CA3AF' },
-          { label: 'With Position',  value: withPosition,     color: '#7C3AED' },
+          { label: 'Total',          value: employees.length,         color: '#01A2B1' },
+          { label: 'Active',         value: activeCount,              color: '#059669' },
+          { label: 'Supabase Linked',value: linkedCount ?? '…',       color: '#7C3AED' },
+          { label: 'With Position',  value: withPosition,             color: '#D97706' },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: s.color + '18' }}>
@@ -1039,6 +1119,7 @@ export default function OrgEmployees() {
               onEdit={() => setFormTarget(emp)}
               onDelete={() => setDeleteTarget(emp)}
               onActions={() => setActionsTarget(emp)}
+              isLinked={linkedEmails ? linkedEmails.has(emp.email?.toLowerCase()) : null}
             />
           ))}
         </div>
@@ -1070,6 +1151,43 @@ export default function OrgEmployees() {
           orgEmployee={actionsTarget}
           onClose={() => setActionsTarget(null)}
         />
+      )}
+
+      {/* Cleanup confirmation dialog */}
+      {cleanupConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <Link2Off size={18} className="text-red-600" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-800">Remove Unlinked Employees?</h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-3">
+              The following <strong>{unlinkedEmployees.length}</strong> employee{unlinkedEmployees.length !== 1 ? 's have' : ' has'} no matching Supabase account and will be permanently removed from the org database:
+            </p>
+            <ul className="mb-4 space-y-1">
+              {unlinkedEmployees.map(e => (
+                <li key={e.id} className="text-xs text-gray-600 flex items-center gap-1.5 px-2 py-1 bg-red-50 border border-red-100 rounded-lg">
+                  <Link2Off size={10} className="text-red-400" />
+                  <span className="font-medium">{e.name}</span>
+                  <span className="text-gray-400">{e.email}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-gray-400 mb-5">This cannot be undone. Their custom field values and occupancy records will also be removed.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setCleanupConfirm(false)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-100">
+                Cancel
+              </button>
+              <button onClick={handleCleanup} disabled={cleanupRemoving}
+                className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium disabled:opacity-50">
+                {cleanupRemoving ? 'Removing…' : `Remove ${unlinkedEmployees.length}`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
     </div>
