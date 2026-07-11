@@ -41,31 +41,33 @@ function CategoryPills({ value, onChange, size = 'sm' }) {
 }
 
 // ─── Create Reviewer Modal ─────────────────────────────────────
+// Two-mode form:
+//   Mode A (default) — reviewer is an existing employee (auto-fills details)
+//   Mode B           — reviewer is external (manual entry)
 function CreateReviewerModal({ onSave, onClose }) {
-  const [employees,     setEmployees]     = useState([]);
+  const [allPeople,     setAllPeople]     = useState([]);   // everyone: supabase + org
   const [loadingEmps,   setLoadingEmps]   = useState(true);
-  // filter state
-  const [filterText,    setFilterText]    = useState('');
-  const [filterLevel,   setFilterLevel]   = useState('');
-  const [filterDiv,     setFilterDiv]     = useState('');
-  const [filterGrade,   setFilterGrade]   = useState('');
-  const [showFilters,   setShowFilters]   = useState(false);
-  // selection: { empId → category }
-  const [selectionMap,  setSelectionMap]  = useState({});   // { id: category }
-  const [defaultCat,    setDefaultCat]    = useState('peer');
-  // reviewer form
-  const [form, setForm] = useState({
-    name: '', email: '', designation: '', department: '', phone: '', role: '',
-  });
+
+  // ── Reviewer identity ──────────────────────────────────────────
+  // mode: 'existing' | 'external'
+  const [mode,          setMode]          = useState('existing');
+  // existing mode: picked reviewer from org list
+  const [reviewerPick,  setReviewerPick]  = useState(null);   // full person object
+  const [reviewerSearch,setReviewerSearch]= useState('');
+  // external mode: manual form
+  const [extForm, setExtForm] = useState({ name: '', email: '', designation: '', department: '', phone: '' });
+
+  // ── Employees being reviewed ───────────────────────────────────
+  const [selectionMap,  setSelectionMap]  = useState({});   // { empId: category }
+  const [defaultCat,    setDefaultCat]    = useState('supervisor');
+  const [empSearch,     setEmpSearch]     = useState('');
+
   const [errors,  setErrors]  = useState({});
   const [saving,  setSaving]  = useState(false);
   const [result,  setResult]  = useState(null);
   const [copied,  setCopied]  = useState(false);
-  // derived filter options built from loaded employees
-  const [levelOpts,   setLevelOpts]   = useState([]);
-  const [divOpts,     setDivOpts]     = useState([]);
-  const [gradeOpts,   setGradeOpts]   = useState([]);
 
+  // Load all people once
   useEffect(() => {
     getAllEmployees().then(supabaseEmps => {
       const supaEmps = supabaseEmps || [];
@@ -73,134 +75,93 @@ function CreateReviewerModal({ onSave, onClose }) {
       const levels   = getHierarchyLevels();
       const levelMap     = Object.fromEntries(levels.map(l => [l.id, l.abbreviation || l.name]));
       const levelFullMap = Object.fromEntries(levels.map(l => [l.id, l.name]));
-      const supaEmails = new Set(supaEmps.map(e => (e.email || '').toLowerCase()));
+      const supaEmails   = new Set(supaEmps.map(e => (e.email || '').toLowerCase()));
 
       const orgMapped = orgEmps
-        .filter(e => e.status !== 'inactive')
+        .filter(e => (e.status || 'active') !== 'inactive')
         .filter(e => !supaEmails.has((e.email || '').toLowerCase()))
         .map(e => {
-          // pull custom field values for this org employee
           let division = e.division || '';
           let grade    = '';
-          try {
-            const cfMap = getEmployeeFieldMap(e.id); // keyed by fieldKey
-            division = cfMap['division']   || e.division || '';  // cf_division.fieldKey = 'division'
-            grade    = cfMap['grade_band'] || '';                // cf_grade.fieldKey    = 'grade_band'
-          } catch {}
+          try { const cfMap = getEmployeeFieldMap(e.id); division = cfMap['division'] || division; grade = cfMap['grade_band'] || ''; } catch {}
           return {
-            id:         e.id,
-            name:       e.name,
-            email:      e.email || '',
-            jobTitle:   levelMap[e.levelId]    || '',
-            levelFull:  levelFullMap[e.levelId] || e.levelId || '',
-            levelId:    e.levelId || '',
-            department: e.city   || '',
-            division,
-            grade,
-            _source:    'org',
+            id: e.id, name: e.name, email: e.email || '',
+            jobTitle: levelMap[e.levelId] || '', levelFull: levelFullMap[e.levelId] || '',
+            division, grade, organization: e.organization || '', _source: 'org',
           };
         });
 
-      // Supabase employees get level/division/grade from their own fields
       const supaMapped = supaEmps.map(e => ({
-        ...e,
-        levelId:   '',
-        levelFull: e.level || e.jobTitle || '',
-        division:  e.department || '',
-        grade:     '',
-        _source:   'supabase',
+        ...e, levelFull: e.level || e.jobTitle || '',
+        division: e.department || '', grade: '', organization: '', _source: 'supabase',
       }));
 
-      const merged = [...supaMapped, ...orgMapped];
-      setEmployees(merged);
-
-      // Build unique filter options from actual data
-      setLevelOpts([...new Set(merged.map(e => e.levelFull).filter(Boolean))].sort());
-      setDivOpts([...new Set(merged.map(e => e.division).filter(Boolean))].sort());
-      setGradeOpts([...new Set(merged.map(e => e.grade).filter(Boolean))].sort());
+      setAllPeople([...supaMapped, ...orgMapped]);
       setLoadingEmps(false);
     });
   }, []);
 
-  const set = k => e => { setForm(f => ({ ...f, [k]: e.target.value })); setErrors(er => ({ ...er, [k]: '' })); };
+  // ── Reviewer picker list (existing mode) ──────────────────────
+  const reviewerList = allPeople.filter(p => {
+    if (!reviewerSearch) return true;
+    const q = reviewerSearch.toLowerCase();
+    return p.name?.toLowerCase().includes(q) || p.email?.toLowerCase().includes(q)
+      || p.jobTitle?.toLowerCase().includes(q) || p.organization?.toLowerCase().includes(q);
+  });
 
-  const selectedIds = Object.keys(selectionMap);
-
-  const toggleEmployee = (id) => {
-    setSelectionMap(prev => {
-      if (prev[id] !== undefined) {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      }
-      return { ...prev, [id]: defaultCat };
-    });
-    setErrors(er => ({ ...er, employeeIds: '' }));
+  const pickReviewer = (person) => {
+    setReviewerPick(person);
+    setErrors(e => ({ ...e, reviewer: '' }));
   };
 
-  const setCategoryForEmployee = (id, cat) => {
-    setSelectionMap(prev => ({ ...prev, [id]: cat }));
-  };
-
-  // Apply all active filters (AND logic)
-  const filteredEmployees = employees.filter(e => {
-    if (filterText) {
-      const q = filterText.toLowerCase();
-      const hit = e.name?.toLowerCase().includes(q)
-        || e.email?.toLowerCase().includes(q)
-        || e.jobTitle?.toLowerCase().includes(q)
-        || e.levelFull?.toLowerCase().includes(q)
-        || e.division?.toLowerCase().includes(q)
-        || e.grade?.toLowerCase().includes(q)
-        || e.department?.toLowerCase().includes(q);
-      if (!hit) return false;
+  // ── Employee (being reviewed) checklist ───────────────────────
+  // Exclude the picked reviewer from the "being reviewed" list
+  const reviewedList = allPeople.filter(p => {
+    if (reviewerPick && p.id === reviewerPick.id) return false;
+    if (empSearch) {
+      const q = empSearch.toLowerCase();
+      return p.name?.toLowerCase().includes(q) || p.email?.toLowerCase().includes(q)
+        || p.jobTitle?.toLowerCase().includes(q) || p.organization?.toLowerCase().includes(q);
     }
-    if (filterLevel && e.levelFull !== filterLevel) return false;
-    if (filterDiv   && e.division  !== filterDiv)   return false;
-    if (filterGrade && e.grade     !== filterGrade) return false;
     return true;
   });
 
-  const visibleAllSelected = filteredEmployees.length > 0
-    && filteredEmployees.every(e => selectionMap[e.id] !== undefined);
+  const selectedIds = Object.keys(selectionMap);
 
-  const selectAll = () => {
-    if (visibleAllSelected) {
-      const visIds = new Set(filteredEmployees.map(e => e.id));
-      setSelectionMap(prev => {
-        const next = { ...prev };
-        visIds.forEach(id => delete next[id]);
-        return next;
-      });
-    } else {
-      setSelectionMap(prev => {
-        const next = { ...prev };
-        filteredEmployees.forEach(e => { if (next[e.id] === undefined) next[e.id] = defaultCat; });
-        return next;
-      });
-    }
+  const toggleEmp = (id) => {
+    setSelectionMap(prev => {
+      if (prev[id] !== undefined) { const n = { ...prev }; delete n[id]; return n; }
+      return { ...prev, [id]: defaultCat };
+    });
+    setErrors(e => ({ ...e, employeeIds: '' }));
   };
 
-  // When default category changes, apply it to all currently-selected employees
   const applyDefaultToAll = (cat) => {
     setDefaultCat(cat);
-    setSelectionMap(prev => {
-      const next = { ...prev };
-      Object.keys(next).forEach(id => { next[id] = cat; });
-      return next;
-    });
+    setSelectionMap(prev => { const n = { ...prev }; Object.keys(n).forEach(id => { n[id] = cat; }); return n; });
   };
 
-  const activeFilterCount = [filterLevel, filterDiv, filterGrade].filter(Boolean).length;
-  const clearFilters = () => { setFilterLevel(''); setFilterDiv(''); setFilterGrade(''); };
+  // ── Resolve reviewer form values ──────────────────────────────
+  const reviewerForm = mode === 'existing' && reviewerPick
+    ? { name: reviewerPick.name, email: reviewerPick.email,
+        designation: reviewerPick.jobTitle || reviewerPick.levelFull || '',
+        department: reviewerPick.organization || reviewerPick.division || '', phone: '' }
+    : extForm;
 
+  const setExt = (k) => (ev) => { setExtForm(f => ({ ...f, [k]: ev.target.value })); setErrors(e => ({ ...e, [k]: '' })); };
+
+  // ── Validate + submit ─────────────────────────────────────────
   const validate = () => {
     const e = {};
-    if (!form.name.trim())        e.name        = 'Full name is required';
-    if (!form.email.trim())       e.email       = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
-    if (!form.designation.trim()) e.designation = 'Designation is required';
-    if (selectedIds.length === 0) e.employeeIds = 'Select at least one employee';
+    if (mode === 'existing') {
+      if (!reviewerPick) e.reviewer = 'Please select a reviewer from the list';
+    } else {
+      if (!extForm.name.trim())  e.name  = 'Full name is required';
+      if (!extForm.email.trim()) e.email = 'Email is required';
+      else if (!/\S+@\S+\.\S+/.test(extForm.email)) e.email = 'Invalid email';
+      if (!extForm.designation.trim()) e.designation = 'Designation is required';
+    }
+    if (selectedIds.length === 0) e.employeeIds = 'Select at least one employee to be reviewed';
     return e;
   };
 
@@ -209,24 +170,24 @@ function CreateReviewerModal({ onSave, onClose }) {
     if (Object.keys(e).length) { setErrors(e); return; }
     setSaving(true);
     const res = await adminCreateReviewer({
-      ...form,
+      ...reviewerForm,
       employeeIds: selectedIds,
-      categoryMap: selectionMap,       // per-employee categories
+      categoryMap: selectionMap,
     });
     setSaving(false);
     if (!res.success) { setErrors({ general: res.error }); return; }
     setResult({
       ...res,
-      selectedEmployees: employees
-        .filter(e => selectedIds.includes(e.id))
-        .map(e => ({ ...e, assignedCategory: selectionMap[e.id] })),
+      selectedEmployees: allPeople
+        .filter(p => selectedIds.includes(p.id))
+        .map(p => ({ ...p, assignedCategory: selectionMap[p.id] })),
     });
     onSave();
   };
 
   const copy = (v) => { navigator.clipboard?.writeText(v).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 2000); };
 
-  // ── Result screen ──────────────────────────────────────────────
+  // ── Result screen ─────────────────────────────────────────────
   if (result) {
     return (
       <div className="space-y-4">
@@ -238,9 +199,8 @@ function CreateReviewerModal({ onSave, onClose }) {
               : `Reviewer account created — assigned to ${result.assignedCount} employee${result.assignedCount !== 1 ? 's' : ''}!`}
           </div>
         </Alert>
-
         <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl">
-          <p className="text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1.5"><Users size={13} />Assigned to:</p>
+          <p className="text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1.5"><Users size={13} />Assigned to review:</p>
           <ul className="space-y-1.5">
             {result.selectedEmployees.map(emp => (
               <li key={emp.id} className="flex items-center gap-2 text-xs text-indigo-900">
@@ -253,294 +213,226 @@ function CreateReviewerModal({ onSave, onClose }) {
               </li>
             ))}
           </ul>
-          {result.failedCount > 0 && (
-            <p className="mt-2 text-xs text-amber-700">⚠ {result.failedCount} assignment{result.failedCount !== 1 ? 's' : ''} failed — please retry.</p>
-          )}
+          {result.failedCount > 0 && <p className="mt-2 text-xs text-amber-700">⚠ {result.failedCount} assignment{result.failedCount !== 1 ? 's' : ''} failed.</p>}
         </div>
-
         <div className="p-4 bg-amber-50 border-2 border-amber-200 rounded-2xl space-y-2">
           <p className="text-sm font-semibold text-amber-800 flex items-center gap-2"><KeyRound size={14} />Login Credentials</p>
-          <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-amber-200 text-sm">
-            <span>Email: <strong>{form.email}</strong></span>
+          <div className="bg-white rounded-xl px-3 py-2 border border-amber-200 text-sm">
+            Email: <strong>{reviewerForm.email}</strong>
           </div>
           <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-amber-200 text-sm">
-            <span>
-              {result.isExistingUser ? 'Current Password: ' : 'Temp Password: '}
-              <code className="font-bold text-amber-700">{result.tempPassword}</code>
-            </span>
+            <span>{result.isExistingUser ? 'Current Password: ' : 'Temp Password: '}<code className="font-bold text-amber-700">{result.tempPassword}</code></span>
             <button onClick={() => copy(result.tempPassword)} className="text-xs text-indigo-600 flex items-center gap-1 ml-2">
               {copied ? <><CheckCircle size={12} />Copied</> : <><Copy size={12} />Copy</>}
             </button>
           </div>
           {result.isExistingUser
             ? <p className="text-xs text-blue-700">ℹ Reviewer already has an account — new assignments added.</p>
-            : <p className="text-xs text-amber-700">⚠ Share with the reviewer. They must change the password on first login.</p>
-          }
+            : <p className="text-xs text-amber-700">⚠ Share with the reviewer. They must change the password on first login.</p>}
         </div>
         <Button className="w-full" onClick={onClose}>Done</Button>
       </div>
     );
   }
 
-  // ── Main form ──────────────────────────────────────────────────
+  // ── Main form ─────────────────────────────────────────────────
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {errors.general && <Alert type="error"><div className="flex gap-2"><AlertCircle size={14} />{errors.general}</div></Alert>}
 
-      {/* ── SECTION 1: Employee Picker ── */}
+      {/* ══ STEP 1: Who is the reviewer? ══════════════════════════ */}
       <div>
-        {/* Header row */}
-        <div className="flex items-center justify-between mb-2">
-          <label className="text-sm font-semibold text-gray-800">
-            Employees Being Reviewed <span className="text-red-500">*</span>
-            {selectedIds.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full font-semibold">
-                {selectedIds.length} selected
-              </span>
-            )}
-          </label>
-          <div className="flex items-center gap-2">
-            {filteredEmployees.length > 0 && (
-              <button type="button" onClick={selectAll}
-                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
-                {visibleAllSelected ? 'Deselect visible' : 'Select visible'}
-              </button>
-            )}
-            <button type="button" onClick={() => setShowFilters(v => !v)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all
-                ${showFilters || activeFilterCount > 0
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-300'}`}>
-              <Filter size={11} />
-              Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-            </button>
-          </div>
+        <p className="text-sm font-semibold text-gray-800 mb-2">
+          Step 1 — Who is the reviewer?
+        </p>
+
+        {/* Mode toggle */}
+        <div className="flex rounded-xl border border-gray-200 overflow-hidden mb-3 text-sm font-medium">
+          <button type="button" onClick={() => { setMode('existing'); setReviewerPick(null); setReviewerSearch(''); setErrors({}); }}
+            className={`flex-1 py-2 flex items-center justify-center gap-2 transition-colors
+              ${mode === 'existing' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+            <UserCheck size={14} />Existing Employee
+          </button>
+          <button type="button" onClick={() => { setMode('external'); setReviewerPick(null); setErrors({}); }}
+            className={`flex-1 py-2 flex items-center justify-center gap-2 transition-colors border-l border-gray-200
+              ${mode === 'external' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+            <Users size={14} />External Reviewer
+          </button>
         </div>
 
-        {/* Text search */}
-        <div className="relative mb-2">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search by name, email, level, division…"
-            value={filterText}
-            onChange={e => setFilterText(e.target.value)}
-            className="w-full pl-8 pr-8 py-2 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
-          />
-          {filterText && (
-            <button onClick={() => setFilterText('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <X size={13} />
-            </button>
-          )}
-        </div>
-
-        {/* Expandable filter bar */}
-        {showFilters && (
-          <div className="mb-2 p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
-            <div className="grid grid-cols-3 gap-2">
-              {/* Level filter */}
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Level</label>
-                <select
-                  value={filterLevel}
-                  onChange={e => setFilterLevel(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                  <option value="">All levels</option>
-                  {levelOpts.map(l => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </div>
-              {/* Division filter */}
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Division</label>
-                <select
-                  value={filterDiv}
-                  onChange={e => setFilterDiv(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                  <option value="">All divisions</option>
-                  {divOpts.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-              {/* Grade filter */}
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Grade</label>
-                <select
-                  value={filterGrade}
-                  onChange={e => setFilterGrade(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded-lg border border-gray-300 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                  <option value="">All grades</option>
-                  {gradeOpts.map(g => <option key={g} value={g}>{g}</option>)}
-                </select>
-              </div>
-            </div>
-            {activeFilterCount > 0 && (
-              <button type="button" onClick={clearFilters}
-                className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium">
-                <X size={11} />Clear all filters
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Active filter chips */}
-        {activeFilterCount > 0 && !showFilters && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {filterLevel && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full font-medium">
-                Level: {filterLevel}
-                <button onClick={() => setFilterLevel('')}><X size={10} /></button>
-              </span>
-            )}
-            {filterDiv && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs rounded-full font-medium">
-                Division: {filterDiv}
-                <button onClick={() => setFilterDiv('')}><X size={10} /></button>
-              </span>
-            )}
-            {filterGrade && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full font-medium">
-                Grade: {filterGrade}
-                <button onClick={() => setFilterGrade('')}><X size={10} /></button>
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Scrollable employee checklist */}
-        <div className={`border rounded-xl overflow-y-auto bg-white ${errors.employeeIds ? 'border-red-400' : 'border-gray-200'}`}
-          style={{ maxHeight: '220px' }}>
-          {loadingEmps ? (
-            <p className="text-center py-8 text-sm text-gray-400">Loading employees…</p>
-          ) : filteredEmployees.length === 0 ? (
-            <p className="text-center py-8 text-sm text-gray-400">No employees match the current filters</p>
-          ) : (
-            filteredEmployees.map((emp, idx) => {
-              const isSelected = selectionMap[emp.id] !== undefined;
-              const isOrg      = emp._source === 'org';
-              return (
-                <div key={emp.id}
-                  className={`flex items-center gap-3 px-3.5 py-2.5 transition-colors
-                    ${isSelected ? 'bg-indigo-50' : 'hover:bg-gray-50'}
-                    ${idx !== filteredEmployees.length - 1 ? 'border-b border-gray-100' : ''}`}>
-                  {/* Checkbox */}
-                  <input type="checkbox" checked={isSelected} onChange={() => toggleEmployee(emp.id)}
-                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0 cursor-pointer" />
-                  {/* Name + meta */}
-                  <div className="min-w-0 flex-1 cursor-pointer" onClick={() => toggleEmployee(emp.id)}>
-                    <p className="text-sm font-medium text-gray-900 truncate">{emp.name}</p>
-                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                      {emp.jobTitle && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600">{emp.jobTitle}</span>
-                      )}
-                      {emp.division && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700">{emp.division}</span>
-                      )}
-                      {emp.grade && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700">{emp.grade}</span>
-                      )}
-                      {emp.department && !emp.division && (
-                        <span className="text-[10px] text-gray-400">{emp.department}</span>
-                      )}
-                    </div>
+        {/* ── Existing employee mode ── */}
+        {mode === 'existing' && (
+          <div>
+            {/* Selected reviewer preview */}
+            {reviewerPick ? (
+              <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-xl mb-2">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-sm font-bold">{reviewerPick.name?.[0]?.toUpperCase()}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-indigo-900">{reviewerPick.name}</p>
+                  <p className="text-xs text-indigo-500 truncate">{reviewerPick.email}</p>
+                  <div className="flex gap-1.5 mt-0.5 flex-wrap">
+                    {reviewerPick.jobTitle && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-semibold">{reviewerPick.jobTitle}</span>}
+                    {reviewerPick.organization && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{reviewerPick.organization}</span>}
                   </div>
-                  {/* Source badge */}
-                  {isOrg && (
-                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-600 border border-violet-200">
-                      Org
-                    </span>
-                  )}
-                  {/* Per-employee category — only shown when selected */}
-                  {isSelected && (
-                    <div className="shrink-0 ml-1">
-                      <CategoryPills
-                        value={selectionMap[emp.id]}
-                        onChange={cat => setCategoryForEmployee(emp.id, cat)}
-                        size="xs"
-                      />
-                    </div>
+                </div>
+                <button type="button" onClick={() => { setReviewerPick(null); setReviewerSearch(''); }}
+                  className="p-1.5 rounded-lg text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700 flex-shrink-0">
+                  <X size={15} />
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="relative mb-1.5">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <input type="text" placeholder="Search employees by name, email, level…"
+                    value={reviewerSearch} onChange={e => setReviewerSearch(e.target.value)}
+                    className={`w-full pl-8 pr-8 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300
+                      ${errors.reviewer ? 'border-red-400' : 'border-gray-300'}`} />
+                  {reviewerSearch && (
+                    <button onClick={() => setReviewerSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                      <X size={13} />
+                    </button>
                   )}
                 </div>
-              );
-            })
-          )}
-        </div>
-        {errors.employeeIds && <p className="mt-1 text-xs text-red-600">{errors.employeeIds}</p>}
+                <div className="border border-gray-200 rounded-xl overflow-y-auto bg-white" style={{ maxHeight: '180px' }}>
+                  {loadingEmps ? (
+                    <p className="text-center py-6 text-sm text-gray-400">Loading…</p>
+                  ) : reviewerList.length === 0 ? (
+                    <p className="text-center py-6 text-sm text-gray-400">No employees found</p>
+                  ) : reviewerList.map((p, idx) => (
+                    <button key={p.id} type="button" onClick={() => pickReviewer(p)}
+                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-indigo-50 transition-colors
+                        ${idx !== reviewerList.length - 1 ? 'border-b border-gray-100' : ''}`}>
+                      <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                        <span className="text-indigo-700 text-xs font-bold">{p.name?.[0]?.toUpperCase()}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
+                        <p className="text-[11px] text-gray-400 truncate">{p.email}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {p.jobTitle && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-semibold">{p.jobTitle}</span>}
+                        {p.organization && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">{p.organization}</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[11px] text-gray-400">{reviewerList.length} of {allPeople.length} shown</p>
+              </>
+            )}
+            {errors.reviewer && <p className="mt-1 text-xs text-red-600">{errors.reviewer}</p>}
+          </div>
+        )}
 
-        {/* Result count */}
-        <p className="mt-1 text-[11px] text-gray-400">
-          {filteredEmployees.length} of {employees.length} employee{employees.length !== 1 ? 's' : ''} shown
-          {selectedIds.length > 0 && ` · ${selectedIds.length} selected`}
-        </p>
+        {/* ── External reviewer mode ── */}
+        {mode === 'external' && (
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Full Name" value={extForm.name} onChange={setExt('name')} error={errors.name} required />
+            <Input label="Email" type="email" value={extForm.email} onChange={setExt('email')} error={errors.email} required />
+            <Input label="Designation" value={extForm.designation} onChange={setExt('designation')} error={errors.designation} required />
+            <Input label="Department / Company" value={extForm.department} onChange={setExt('department')} />
+            <Input label="Phone" value={extForm.phone} onChange={setExt('phone')} />
+          </div>
+        )}
       </div>
 
-      {/* ── SECTION 2: Default category + bulk-apply ── */}
-      {selectedIds.length > 0 && (
-        <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
-              <Tag size={12} />Default category for new selections
-            </p>
-            <button type="button"
-              onClick={() => applyDefaultToAll(defaultCat)}
-              className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium underline">
-              Apply to all selected
-            </button>
-          </div>
-          <CategoryPills value={defaultCat} onChange={applyDefaultToAll} />
-          <p className="mt-2 text-[10px] text-gray-400">
-            Each selected employee shows their individual category above — override per row if needed.
-          </p>
-        </div>
-      )}
+      {/* ══ STEP 2: Who are they reviewing? ═══════════════════════ */}
+      <div>
+        <p className="text-sm font-semibold text-gray-800 mb-2">
+          Step 2 — Who are they reviewing?
+          {selectedIds.length > 0 && (
+            <span className="ml-2 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full font-semibold">
+              {selectedIds.length} selected
+            </span>
+          )}
+        </p>
 
-      {/* ── SECTION 3: Selected employees summary chips ── */}
-      {selectedIds.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold text-gray-700 mb-1.5">Selected ({selectedIds.length})</p>
-          <div className="flex flex-wrap gap-1.5">
+        {/* Default category + bulk-apply */}
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <span className="text-xs text-gray-500 font-medium">Category:</span>
+          <CategoryPills value={defaultCat} onChange={applyDefaultToAll} />
+          {selectedIds.length > 0 && (
+            <button type="button" onClick={() => applyDefaultToAll(defaultCat)}
+              className="text-[11px] text-indigo-500 hover:text-indigo-700 underline ml-auto">
+              Apply to all
+            </button>
+          )}
+        </div>
+
+        {/* Search */}
+        <div className="relative mb-1.5">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input type="text" placeholder="Search employees…"
+            value={empSearch} onChange={e => setEmpSearch(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white" />
+        </div>
+
+        {/* Checklist */}
+        <div className={`border rounded-xl overflow-y-auto bg-white ${errors.employeeIds ? 'border-red-400' : 'border-gray-200'}`}
+          style={{ maxHeight: '200px' }}>
+          {loadingEmps ? (
+            <p className="text-center py-6 text-sm text-gray-400">Loading employees…</p>
+          ) : reviewedList.length === 0 ? (
+            <p className="text-center py-6 text-sm text-gray-400">No employees found</p>
+          ) : reviewedList.map((emp, idx) => {
+            const isSel = selectionMap[emp.id] !== undefined;
+            return (
+              <div key={emp.id}
+                className={`flex items-center gap-3 px-3.5 py-2.5 transition-colors cursor-pointer
+                  ${isSel ? 'bg-indigo-50' : 'hover:bg-gray-50'}
+                  ${idx !== reviewedList.length - 1 ? 'border-b border-gray-100' : ''}`}
+                onClick={() => toggleEmp(emp.id)}>
+                <input type="checkbox" checked={isSel} onChange={() => {}} onClick={e => e.stopPropagation()}
+                  className="w-4 h-4 rounded border-gray-300 text-indigo-600 shrink-0 pointer-events-none" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900 truncate">{emp.name}</p>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                    {emp.jobTitle && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600">{emp.jobTitle}</span>}
+                    {(emp.organization || emp.division) && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700">{emp.organization || emp.division}</span>}
+                  </div>
+                </div>
+                {isSel && (
+                  <div className="shrink-0" onClick={e => e.stopPropagation()}>
+                    <CategoryPills value={selectionMap[emp.id]}
+                      onChange={cat => setSelectionMap(prev => ({ ...prev, [emp.id]: cat }))} size="xs" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {errors.employeeIds && <p className="mt-1 text-xs text-red-600">{errors.employeeIds}</p>}
+        <p className="mt-1 text-[11px] text-gray-400">
+          {reviewedList.length} of {allPeople.length} shown{selectedIds.length > 0 ? ` · ${selectedIds.length} selected` : ''}
+        </p>
+
+        {/* Selected chips */}
+        {selectedIds.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
             {selectedIds.map(id => {
-              const emp = employees.find(e => e.id === id);
+              const emp = allPeople.find(p => p.id === id);
               if (!emp) return null;
-              const cat = selectionMap[id];
               return (
-                <span key={id}
-                  className="flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-800 font-medium">
+                <span key={id} className="flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-800 font-medium">
                   {emp.name}
                   <span className="px-1.5 py-0.5 bg-indigo-200 text-indigo-800 rounded-lg text-[10px] font-semibold">
-                    {CATEGORY_LABELS[cat] || cat}
+                    {CATEGORY_LABELS[selectionMap[id]] || selectionMap[id]}
                   </span>
-                  <button type="button" onClick={() => toggleEmployee(id)}
-                    className="text-indigo-400 hover:text-indigo-700 ml-0.5">
-                    <X size={11} />
-                  </button>
+                  <button type="button" onClick={() => toggleEmp(id)} className="text-indigo-400 hover:text-indigo-700 ml-0.5"><X size={11} /></button>
                 </span>
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* ── SECTION 4: Reviewer details ── */}
-      <div>
-        <p className="text-xs font-semibold text-gray-700 mb-2">Reviewer Details</p>
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Full Name"    value={form.name}        onChange={set('name')}        error={errors.name}        required />
-          <Input label="Email"        value={form.email}       onChange={set('email')}       error={errors.email}       type="email" required />
-          <Input label="Designation"  value={form.designation} onChange={set('designation')} error={errors.designation} required />
-          <Input label="Department"   value={form.department}  onChange={set('department')} />
-          <Input label="Phone"        value={form.phone}       onChange={set('phone')} />
-          <Input label="Role / Title" value={form.role}        onChange={set('role')} />
-        </div>
+        )}
       </div>
-
-      <Alert type="info" className="mt-1">
-        Reviewer will be auto-approved and assigned to all selected employees with their individual categories. A temporary password is generated — share it with the reviewer.
-      </Alert>
 
       <div className="flex gap-3 justify-end pt-1">
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button onClick={handleSave} disabled={saving || loadingEmps}>
           <Plus size={14} />
-          {saving ? 'Creating…' : `Create Reviewer${selectedIds.length > 0 ? ` & Assign (${selectedIds.length})` : ''}`}
+          {saving ? 'Creating…' : `Add Reviewer${selectedIds.length > 0 ? ` (${selectedIds.length} assigned)` : ''}`}
         </Button>
       </div>
     </div>
