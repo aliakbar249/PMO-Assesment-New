@@ -1068,6 +1068,16 @@ export default function OrgEmployees() {
   useEffect(() => {
     getCompanies().then(cos => setCompanies((cos || []).filter(c => c.active)));
     getAllCompanyAdmins().then(admins => setCompanyAdmins(admins || []));
+
+    // One-time purge: remove legacy seed employees that still exist in localStorage.
+    // Seed records are identifiable by their @optem.com email — these were never
+    // real employees and were removed from the seed array but may still be stored.
+    const all = getOrgEmployees();
+    const seeds = all.filter(e => (e.email || '').toLowerCase().endsWith('@optem.com'));
+    if (seeds.length > 0) {
+      seeds.forEach(e => deleteOrgEmployee(e.id));
+      bump();
+    }
   }, []); // eslint-disable-line
 
   // Data — re-read on every refresh tick
