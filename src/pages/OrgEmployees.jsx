@@ -932,7 +932,6 @@ function DeleteConfirm({ employee, onClose, onConfirm }) {
 // ─── Employee Row Card ────────────────────────────────────────────────────────
 function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActions }) {
   const [expanded, setExpanded] = useState(false);
-  const isSupabase = employee._source === 'supabase';
   const level = levels.find(l => l.id === employee.levelId);
   const primaryPos = getEmployeePrimaryPosition(employee.id);
   const cfValues = getCustomFieldValues(employee.id);
@@ -1012,18 +1011,14 @@ function EmployeeCard({ employee, levels, customFields, onEdit, onDelete, onActi
             className="p-1.5 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors">
             <Settings size={14} />
           </button>
-          {!isSupabase && (
-            <button onClick={onEdit}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-[#01A2B1] hover:bg-[#01A2B1]/10 transition-colors">
-              <Edit2 size={14} />
-            </button>
-          )}
-          {!isSupabase && (
-            <button onClick={onDelete}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
-              <Trash2 size={14} />
-            </button>
-          )}
+          <button onClick={onEdit}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-[#01A2B1] hover:bg-[#01A2B1]/10 transition-colors">
+            <Edit2 size={14} />
+          </button>
+          <button onClick={onDelete}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+            <Trash2 size={14} />
+          </button>
         </div>
       </div>
 
