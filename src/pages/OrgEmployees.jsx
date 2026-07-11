@@ -10,13 +10,13 @@ import {
   getAssessment, getAssignmentsByEmployee, getNominations, getAllReviewers,
   getUserByEmployeeId, assignTemplateToEmployee, getAssessmentTemplates,
   getEmployeeTemplateId, adminResetPassword, adminSetPassword,
-  getAllEmployees, getCompanies,
+  getAllEmployees, getCompanies, adminCreateCompanyAdmin, getAllCompanyAdmins,
 } from '../lib/supabase';
 import {
   Users, Plus, Edit2, Trash2, Search, X, CheckCircle, AlertTriangle,
-  ChevronDown, ChevronRight, EyeOff, GitBranch, Briefcase, Mail,
+  ChevronDown, ChevronRight, ChevronUp, EyeOff, GitBranch, Briefcase, Mail,
   MapPin, Save, Settings, KeyRound, Layers, RefreshCw, Lock, Copy,
-  AlertCircle, Star, Building2,
+  AlertCircle, Star, Building2, ShieldCheck,
 } from 'lucide-react';
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -115,6 +115,126 @@ function FieldDisplay({ value, fieldType }) {
   if (value === 'true')  return <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-xs rounded-full font-medium">Yes</span>;
   if (value === 'false') return <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full font-medium">No</span>;
   return <span className="text-sm text-gray-800">{value}</span>;
+}
+
+// ─── Create Company Admin Modal ──────────────────────────────────────────────
+function CreateCompanyAdminModal({ companies, onSaved, onClose }) {
+  const [form,   setForm]   = useState({ name: '', email: '', organization: '' });
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
+
+  const validate = () => {
+    const e = {};
+    if (!form.name.trim())         e.name         = 'Full name is required';
+    if (!form.email.trim())        e.email        = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
+    if (!form.organization.trim()) e.organization = 'Company is required';
+    return e;
+  };
+
+  const handleSave = async () => {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setSaving(true);
+    const res = await adminCreateCompanyAdmin(form);
+    setSaving(false);
+    if (!res.success) { setErrors({ general: res.error }); return; }
+    onSaved();          // refresh the list in the background
+    setResult(res);     // show credentials screen (keeps modal open)
+  };
+
+  const copyText = (v) => {
+    navigator.clipboard?.writeText(v).catch(() => {});
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (result) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className="flex items-center gap-2 text-emerald-700 font-semibold">
+            <CheckCircle size={18} />Company Admin account created!
+          </div>
+          <p className="text-xs text-gray-500">Company: <strong>{form.organization}</strong></p>
+          <div className="p-4 bg-amber-50 border-2 border-amber-200 rounded-xl space-y-2">
+            <p className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+              <KeyRound size={14} />Temporary Login Credentials
+            </p>
+            <div className="text-sm bg-white rounded-lg px-3 py-2 border border-amber-200">
+              Email: <strong>{form.email}</strong>
+            </div>
+            <div className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-amber-200">
+              <span className="text-sm">Password: <code className="font-bold text-amber-700">{result.tempPassword}</code></span>
+              <button onClick={() => copyText(result.tempPassword)}
+                className="text-xs text-indigo-600 flex items-center gap-1 ml-2">
+                {copied ? <><CheckCircle size={11} />Copied</> : <><Copy size={11} />Copy</>}
+              </button>
+            </div>
+            <p className="text-xs text-amber-600">Share these credentials. They will be prompted to change the password on first login.</p>
+          </div>
+          <button onClick={onClose}
+            className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-sm font-semibold text-white rounded-xl">
+            Done — Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+            <ShieldCheck size={16} className="text-amber-500" />Create Company Admin
+          </h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"><X size={18} /></button>
+        </div>
+        <div className="space-y-4">
+          {errors.general && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{errors.general}</div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Full Name <span className="text-red-500">*</span></label>
+            <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Sara Ahmed"
+              className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] ${errors.name ? 'border-red-400' : 'border-gray-300'}`} />
+            {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Email Address <span className="text-red-500">*</span></label>
+            <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="admin@company.com"
+              className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] ${errors.email ? 'border-red-400' : 'border-gray-300'}`} />
+            {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Company <span className="text-red-500">*</span></label>
+            <select value={form.organization} onChange={e => set('organization', e.target.value)}
+              className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] ${errors.organization ? 'border-red-400' : 'border-gray-300'}`}>
+              <option value="">— select company —</option>
+              {(companies || []).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+            {errors.organization && <p className="text-xs text-red-500 mt-1">{errors.organization}</p>}
+          </div>
+          <p className="text-xs text-gray-400 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+            This admin will only see employees in their company. A temporary password will be auto-generated.
+          </p>
+          <div className="flex justify-end gap-3 pt-1">
+            <button onClick={onClose}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+            <button onClick={handleSave} disabled={saving}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+              style={{ background: '#01A2B1' }}>
+              <ShieldCheck size={14} />{saving ? 'Creating…' : 'Create Company Admin'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Employee Form Modal (create + edit + custom fields) ───────────────────────
@@ -937,14 +1057,18 @@ export default function OrgEmployees() {
   const [deleteTarget,  setDeleteTarget]  = useState(null);
   const [actionsTarget, setActionsTarget] = useState(null);
   const [toast,         setToast]         = useState(null);
-  const [companies,     setCompanies]     = useState([]);
+  const [companies,          setCompanies]          = useState([]);
+  const [companyAdmins,       setCompanyAdmins]       = useState([]);
+  const [adminSectionOpen,    setAdminSectionOpen]    = useState(false);
+  const [createAdminModal,    setCreateAdminModal]    = useState(false);
 
   const bump = () => setRefresh(r => r + 1);
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
 
-  // On mount: load companies + silently remove employees with no organization
+  // On mount: load companies + company admins + silently remove employees with no organization
   useEffect(() => {
     getCompanies().then(cos => setCompanies((cos || []).filter(c => c.active)));
+    getAllCompanyAdmins().then(admins => setCompanyAdmins(admins || []));
 
     // Remove any org employees that have no company assigned — they are incomplete/seed records
     const all = getOrgEmployees();
@@ -1001,12 +1125,19 @@ export default function OrgEmployees() {
             Manage org employees, hierarchy assignments, and custom profile fields.
           </p>
         </div>
-        <button
-          onClick={() => setFormTarget({})}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm hover:opacity-90"
-          style={{ background: '#01A2B1' }}>
-          <Plus size={16} /> Add Employee
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCreateAdminModal(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 shadow-sm">
+            <ShieldCheck size={15} /> Create Company Admin
+          </button>
+          <button
+            onClick={() => setFormTarget({})}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-sm hover:opacity-90"
+            style={{ background: '#01A2B1' }}>
+            <Plus size={16} /> Add Employee
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -1083,6 +1214,50 @@ export default function OrgEmployees() {
         Showing {filtered.length} of {employees.length} employees
       </div>
 
+      {/* Company Admins Section */}
+      <div className="border border-amber-200 rounded-2xl overflow-hidden">
+        <button
+          onClick={() => setAdminSectionOpen(o => !o)}
+          className="w-full flex items-center justify-between px-5 py-3.5 bg-amber-50 hover:bg-amber-100 transition-colors">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={16} className="text-amber-600" />
+            <span className="text-sm font-semibold text-amber-800">Company Admins</span>
+            <span className="text-xs px-2 py-0.5 bg-amber-200 text-amber-800 rounded-full font-medium">{companyAdmins.length}</span>
+          </div>
+          {adminSectionOpen ? <ChevronUp size={16} className="text-amber-600" /> : <ChevronDown size={16} className="text-amber-600" />}
+        </button>
+        {adminSectionOpen && (
+          <div className="p-4 bg-white">
+            {companyAdmins.length === 0 ? (
+              <div className="text-center py-6 text-sm text-gray-400">
+                No company admins yet. Click <strong>Create Company Admin</strong> above to add one.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {companyAdmins.map(ca => (
+                  <div key={ca.id} className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center flex-shrink-0">
+                      <span className="text-white text-sm font-bold">{ca.name?.[0]?.toUpperCase()}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-gray-800">{ca.name}</div>
+                      <div className="text-xs text-gray-500 truncate">{ca.email}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <Building2 size={12} className="text-amber-500" />
+                      <span className="text-xs font-medium text-amber-700">{ca.organization || '—'}</span>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      (ca.status || 'active') === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                    }`}>{(ca.status || 'active') === 'active' ? 'Active' : 'Inactive'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Modals */}
       {formTarget !== null && (
         <EmployeeModal
@@ -1108,6 +1283,19 @@ export default function OrgEmployees() {
         />
       )}
 
+      {createAdminModal && (
+        <CreateCompanyAdminModal
+          companies={companies}
+          onSaved={() => {
+            // Refresh list in background — do NOT close modal here;
+            // the modal stays open to show credentials until user clicks Done.
+            showToast('Company admin account created.');
+            getAllCompanyAdmins().then(admins => setCompanyAdmins(admins || []));
+            setAdminSectionOpen(true);
+          }}
+          onClose={() => setCreateAdminModal(false)}
+        />
+      )}
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
