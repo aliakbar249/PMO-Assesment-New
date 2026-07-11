@@ -23,26 +23,33 @@ const NAV = {
   ],
   admin: [
     { id: 'adm-dashboard',     label: 'Dashboard',             icon: LayoutDashboard },
+
     { section: 'Organisation' },
     { id: 'adm-companies',     label: 'Companies',             icon: Building2 },
-    { id: 'adm-org-chart',     label: 'Org Chart',             icon: Network },
-    { id: 'adm-hier-levels',   label: 'Hierarchy Levels',      icon: GitBranch,  sub: true },
-    { id: 'adm-org-units',     label: 'Org Units',             icon: Map,        sub: true },
-    { id: 'adm-positions',     label: 'Positions',             icon: MapPin,     sub: true },
-    { id: 'adm-occupancy',     label: 'Position Occupancy',    icon: UserCheck,  sub: true },
     { id: 'adm-employees',     label: 'Employees',             icon: UserCog },
-    { id: 'adm-custom-fields', label: 'Custom Fields',         icon: Sliders,    sub: true },
-    { id: 'adm-auto-rules',    label: 'Auto-Assignment Rules', icon: Zap,        sub: true },
     { id: 'adm-profiles',      label: 'Reviewer Profiles',     icon: Users },
+    { id: 'adm-org-chart',     label: 'Org Chart',             icon: Network },
+
+    { section: 'Configuration' },
+    { id: 'adm-hier-levels',   label: 'Hierarchy Levels',      icon: GitBranch },
+    { id: 'adm-org-units',     label: 'Org Units',             icon: Map },
+    { id: 'adm-positions',     label: 'Positions',             icon: MapPin },
+    { id: 'adm-occupancy',     label: 'Position Occupancy',    icon: UserCheck },
+    { id: 'adm-custom-fields', label: 'Custom Fields',         icon: Sliders },
+    { id: 'adm-auto-rules',    label: 'Auto-Assignment Rules', icon: Zap },
+
     { section: 'Assessments' },
     { id: 'adm-templates',     label: 'Assessment Templates',  icon: Settings },
     { id: 'adm-progress',      label: 'Track Progress',        icon: Eye },
+
     { section: 'KPI Management' },
-    { id: 'adm-kpis',          label: 'KPI Dashboard',         icon: Target },
     { id: 'adm-kpi-lib',       label: 'KPI Library',           icon: Library },
     { id: 'adm-kpi-builder',   label: 'Template Builder',      icon: LayoutTemplate },
+    { id: 'adm-kpis',          label: 'KPI Dashboard',         icon: Target },
+
     { section: 'Training' },
     { id: 'adm-training',      label: 'Training Targets',      icon: BookOpen },
+
     { section: 'Reports' },
     { id: 'adm-export',        label: 'Export Data',           icon: ClipboardList },
   ],
