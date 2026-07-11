@@ -54,34 +54,11 @@ const SEED_POSITIONS = [
   { id: 'pos_mrlhr003',  positionCode: 'MR-LHR-003',   title: 'MR LHR-003',    hierarchyLevelId: 'lvl_mr',  parentPositionId: 'pos_asmdha01', orgUnitId: 'ou_lhr003', division: 'Oncology',     isActive: true, createdAt: '2026-01-01T00:00:00Z', createdBy: 'admin' },
 ];
 
-// ─── PositionOccupancy seed ───────────────────────────────────────────────────
-// Note: ASM-DHA-01 (pos_asmdha01) has NO primary occupant — demonstrating vacancy.
-// Omar Sheikh is not assigned as primary anywhere.
-// Nadia Baig holds primary on GLB and acting on DHA.
-const SEED_OCCUPANCIES = [
-  { id: 'occ_01', positionId: 'pos_nsm001',   employeeId: 'oemp_tariq',   occupancyType: 'primary',     effectiveFrom: '2026-01-01', effectiveTo: null, notes: '', createdAt: '2026-01-01T00:00:00Z', createdBy: 'admin' },
-  { id: 'occ_02', positionId: 'pos_zm001',     employeeId: 'oemp_sana',    occupancyType: 'primary',     effectiveFrom: '2026-01-01', effectiveTo: null, notes: '', createdAt: '2026-01-01T00:00:00Z', createdBy: 'admin' },
-  { id: 'occ_03', positionId: 'pos_rsmlhr01',  employeeId: 'oemp_ali',     occupancyType: 'primary',     effectiveFrom: '2026-01-01', effectiveTo: null, notes: '', createdAt: '2026-01-01T00:00:00Z', createdBy: 'admin' },
-  { id: 'occ_04', positionId: 'pos_asmglb01',  employeeId: 'oemp_nadia',   occupancyType: 'primary',     effectiveFrom: '2026-01-01', effectiveTo: null, notes: '', createdAt: '2026-01-01T00:00:00Z', createdBy: 'admin' },
-  // Nadia also covering DHA as Acting (vacancy demonstration)
-  { id: 'occ_05', positionId: 'pos_asmdha01',  employeeId: 'oemp_nadia',   occupancyType: 'acting',      effectiveFrom: '2026-06-01', effectiveTo: null, notes: 'Covering vacancy', createdAt: '2026-06-01T00:00:00Z', createdBy: 'admin' },
-  { id: 'occ_06', positionId: 'pos_mrlhr001',  employeeId: 'oemp_sara',    occupancyType: 'primary',     effectiveFrom: '2026-03-01', effectiveTo: null, notes: '', createdAt: '2026-03-01T00:00:00Z', createdBy: 'admin' },
-  { id: 'occ_07', positionId: 'pos_mrlhr002',  employeeId: 'oemp_kamran',  occupancyType: 'primary',     effectiveFrom: '2026-02-01', effectiveTo: null, notes: '', createdAt: '2026-02-01T00:00:00Z', createdBy: 'admin' },
-  { id: 'occ_08', positionId: 'pos_mrlhr003',  employeeId: 'oemp_fareeha', occupancyType: 'primary',     effectiveFrom: '2026-01-01', effectiveTo: null, notes: '', createdAt: '2026-01-01T00:00:00Z', createdBy: 'admin' },
-  // Omar Sheikh is listed as an employee but has no primary position (further vacancy demo)
-];
+// ─── PositionOccupancy seed — empty; assigned by admin via Position Occupancy page ──
+const SEED_OCCUPANCIES = [];
 
-// ─── Employees (keep IDs + emails stable for auth compatibility) ──────────────
-const SEED_ORG_EMPLOYEES = [
-  { id: 'oemp_tariq',   name: 'Tariq Mahmood',  levelId: 'lvl_nsm', email: 'tariq@optem.com',   city: 'Lahore',    region: 'National', division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
-  { id: 'oemp_sana',    name: 'Sana Iqbal',     levelId: 'lvl_zm',  email: 'sana@optem.com',    city: 'Islamabad', region: 'North',    division: 'Oncology',     status: 'active', organization: 'Optem Consulting' },
-  { id: 'oemp_ali',     name: 'Ali Hassan',     levelId: 'lvl_rsm', email: 'ali@optem.com',     city: 'Lahore',    region: 'Central',  division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
-  { id: 'oemp_nadia',   name: 'Nadia Baig',     levelId: 'lvl_asm', email: 'nadia@optem.com',   city: 'Lahore',    region: 'Gulberg',  division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
-  { id: 'oemp_omar',    name: 'Omar Sheikh',    levelId: 'lvl_asm', email: 'omar@optem.com',    city: 'Lahore',    region: 'DHA',      division: 'Oncology',     status: 'active', organization: 'Optem Consulting' },
-  { id: 'oemp_sara',    name: 'Sara Mahmood',   levelId: 'lvl_mr',  email: 'sara@optem.com',    city: 'Lahore',    region: 'Central',  division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
-  { id: 'oemp_kamran',  name: 'Kamran Ali',     levelId: 'lvl_mr',  email: 'kamran@optem.com',  city: 'Lahore',    region: 'East',     division: 'Oncology',     status: 'active', organization: 'Optem Consulting' },
-  { id: 'oemp_fareeha', name: 'Fareeha Khan',   levelId: 'lvl_smr', email: 'fareeha@optem.com', city: 'Lahore',    region: 'West',     division: 'Primary Care', status: 'active', organization: 'Optem Consulting' },
-];
+// ─── Employees — intentionally empty; all employees are created by admins ──────
+const SEED_ORG_EMPLOYEES = [];
 
 // ─── Reporting Lines (legacy — kept for backward compatibility, superseded by position model) ───
 const SEED_REPORTING_LINES = [];
@@ -105,77 +82,8 @@ const SEED_CUSTOM_FIELDS = [
   { id: 'cf_incentive', label: 'Incentive Plan',            fieldKey: 'incentive_plan',      fieldType: 'dropdown_single', options: ['Standard','Accelerated','KAM Plan'],                                         section: 'Compensation & Grade', displayOrder: 2, isRequired: false, isFilterable: false, isVisibleToEmployee: false, appliesToLevels: [], status: 'active', createdAt: '2026-01-01T00:00:00Z' },
 ];
 
-// ─── Custom field values for 8 demo employees ─────────────────────────────────
-const SEED_CUSTOM_FIELD_VALUES = [
-  // Tariq Mahmood — NSM
-  { id: 'cfv_001', employeeId: 'oemp_tariq',   fieldDefinitionId: 'cf_grade',     value: 'NSM',          updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_002', employeeId: 'oemp_tariq',   fieldDefinitionId: 'cf_yoe',       value: '18',           updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_003', employeeId: 'oemp_tariq',   fieldDefinitionId: 'cf_emptype',   value: 'Permanent',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_004', employeeId: 'oemp_tariq',   fieldDefinitionId: 'cf_division',  value: 'Primary Care', updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_005', employeeId: 'oemp_tariq',   fieldDefinitionId: 'cf_comp_band', value: 'Band A',       updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_006', employeeId: 'oemp_tariq',   fieldDefinitionId: 'cf_ta',        value: JSON.stringify(['Primary Care']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  // Sana Iqbal — ZM
-  { id: 'cfv_010', employeeId: 'oemp_sana',    fieldDefinitionId: 'cf_grade',     value: 'ZM',           updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_011', employeeId: 'oemp_sana',    fieldDefinitionId: 'cf_yoe',       value: '12',           updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_012', employeeId: 'oemp_sana',    fieldDefinitionId: 'cf_emptype',   value: 'Permanent',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_013', employeeId: 'oemp_sana',    fieldDefinitionId: 'cf_division',  value: 'Oncology',     updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_014', employeeId: 'oemp_sana',    fieldDefinitionId: 'cf_ta',        value: JSON.stringify(['Oncology']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_015', employeeId: 'oemp_sana',    fieldDefinitionId: 'cf_comp_band', value: 'Band A',       updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  // Ali Hassan — RSM
-  { id: 'cfv_020', employeeId: 'oemp_ali',     fieldDefinitionId: 'cf_grade',     value: 'RSM',          updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_021', employeeId: 'oemp_ali',     fieldDefinitionId: 'cf_yoe',       value: '10',           updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_022', employeeId: 'oemp_ali',     fieldDefinitionId: 'cf_emptype',   value: 'Permanent',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_023', employeeId: 'oemp_ali',     fieldDefinitionId: 'cf_division',  value: 'Primary Care', updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_024', employeeId: 'oemp_ali',     fieldDefinitionId: 'cf_terr_code', value: 'LHR-RSM-01',   updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_025', employeeId: 'oemp_ali',     fieldDefinitionId: 'cf_ta',        value: JSON.stringify(['Primary Care']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_026', employeeId: 'oemp_ali',     fieldDefinitionId: 'cf_comp_band', value: 'Band B',       updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  // Nadia Baig — ASM
-  { id: 'cfv_030', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_grade',     value: 'ASM',          updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_031', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_yoe',       value: '7',            updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_032', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_emptype',   value: 'Permanent',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_033', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_division',  value: 'Primary Care', updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_034', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_terr_code', value: 'LHR-ASM-GLB',  updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_035', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_vehicle',   value: 'true',         updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_036', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_ta',        value: JSON.stringify(['Primary Care']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_037', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_products',  value: JSON.stringify(['CardioMax','RespirEase']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_038', employeeId: 'oemp_nadia',   fieldDefinitionId: 'cf_comp_band', value: 'Band B',       updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  // Omar Sheikh — ASM (no primary position — vacancy demo)
-  { id: 'cfv_040', employeeId: 'oemp_omar',    fieldDefinitionId: 'cf_grade',     value: 'ASM',          updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_041', employeeId: 'oemp_omar',    fieldDefinitionId: 'cf_yoe',       value: '6',            updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_042', employeeId: 'oemp_omar',    fieldDefinitionId: 'cf_emptype',   value: 'Permanent',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_043', employeeId: 'oemp_omar',    fieldDefinitionId: 'cf_division',  value: 'Oncology',     updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_044', employeeId: 'oemp_omar',    fieldDefinitionId: 'cf_terr_code', value: 'LHR-ASM-DHA',  updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_045', employeeId: 'oemp_omar',    fieldDefinitionId: 'cf_ta',        value: JSON.stringify(['Oncology']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_046', employeeId: 'oemp_omar',    fieldDefinitionId: 'cf_comp_band', value: 'Band C',       updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  // Sara Mahmood — MR
-  { id: 'cfv_050', employeeId: 'oemp_sara',    fieldDefinitionId: 'cf_grade',     value: 'MR-2',         updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_051', employeeId: 'oemp_sara',    fieldDefinitionId: 'cf_yoe',       value: '3',            updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_052', employeeId: 'oemp_sara',    fieldDefinitionId: 'cf_emptype',   value: 'Permanent',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_053', employeeId: 'oemp_sara',    fieldDefinitionId: 'cf_division',  value: 'Primary Care', updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_054', employeeId: 'oemp_sara',    fieldDefinitionId: 'cf_terr_code', value: 'LHR-001',      updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_055', employeeId: 'oemp_sara',    fieldDefinitionId: 'cf_ta',        value: JSON.stringify(['Primary Care']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_056', employeeId: 'oemp_sara',    fieldDefinitionId: 'cf_products',  value: JSON.stringify(['CardioMax','RespirEase']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_057', employeeId: 'oemp_sara',    fieldDefinitionId: 'cf_comp_band', value: 'Band C',       updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  // Kamran Ali — MR
-  { id: 'cfv_060', employeeId: 'oemp_kamran',  fieldDefinitionId: 'cf_grade',     value: 'MR-1',         updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_061', employeeId: 'oemp_kamran',  fieldDefinitionId: 'cf_yoe',       value: '2',            updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_062', employeeId: 'oemp_kamran',  fieldDefinitionId: 'cf_emptype',   value: 'Permanent',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_063', employeeId: 'oemp_kamran',  fieldDefinitionId: 'cf_division',  value: 'Oncology',     updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_064', employeeId: 'oemp_kamran',  fieldDefinitionId: 'cf_terr_code', value: 'LHR-002',      updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_065', employeeId: 'oemp_kamran',  fieldDefinitionId: 'cf_ta',        value: JSON.stringify(['Oncology']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_066', employeeId: 'oemp_kamran',  fieldDefinitionId: 'cf_products',  value: JSON.stringify(['OncoPrime']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_067', employeeId: 'oemp_kamran',  fieldDefinitionId: 'cf_comp_band', value: 'Band D',       updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  // Fareeha Khan — Senior MR
-  { id: 'cfv_070', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_grade',     value: 'Senior MR',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_071', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_yoe',       value: '5',            updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_072', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_emptype',   value: 'Permanent',    updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_073', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_division',  value: 'Primary Care', updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_074', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_terr_code', value: 'LHR-003',      updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_075', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_ta',        value: JSON.stringify(['Primary Care','Cardiology']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_076', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_products',  value: JSON.stringify(['CardioMax','ImmuBoost']), updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_077', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_vehicle',   value: 'true',         updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-  { id: 'cfv_078', employeeId: 'oemp_fareeha', fieldDefinitionId: 'cf_comp_band', value: 'Band C',       updatedAt: '2026-01-01T00:00:00Z', updatedBy: 'admin' },
-];
+// ─── Custom field values — empty; populated by admin when editing employee profiles ──
+const SEED_CUSTOM_FIELD_VALUES = [];
 
 // ─── Auto-Assignment Rules seed ───────────────────────────────────────────────
 const SEED_AUTO_RULES = [
@@ -213,13 +121,13 @@ function loadOrg() {
     if (!raw) {
       const initial = {
         hierarchyLevels:   SEED_HIERARCHY_LEVELS,
-        orgEmployees:      SEED_ORG_EMPLOYEES,
+        orgEmployees:      [],
         reportingLines:    SEED_REPORTING_LINES,
         orgUnits:          SEED_ORG_UNITS,
         positions:         SEED_POSITIONS,
-        occupancies:       SEED_OCCUPANCIES,
+        occupancies:       [],
         customFields:      SEED_CUSTOM_FIELDS,
-        customFieldValues: SEED_CUSTOM_FIELD_VALUES,
+        customFieldValues: [],
         autoRules:         SEED_AUTO_RULES,
         autoRuleLogs:      [],
       };
@@ -227,38 +135,25 @@ function loadOrg() {
       return initial;
     }
     const parsed = JSON.parse(raw);
-
-    // Backfill: if stored employees are missing the `organization` field,
-    // patch them from the seed using the stable employee ID as the key.
-    // This repairs data written before the organization field was introduced.
-    const seedEmpMap = {};
-    SEED_ORG_EMPLOYEES.forEach(e => { seedEmpMap[e.id] = e; });
-    const patchedEmployees = (parsed.orgEmployees || []).map(emp => {
-      if (!emp.organization && seedEmpMap[emp.id]?.organization) {
-        return { ...emp, organization: seedEmpMap[emp.id].organization };
-      }
-      return emp;
-    });
-
     // Backfill pattern — new tables get seeded if missing
     return {
       hierarchyLevels:   parsed.hierarchyLevels   || SEED_HIERARCHY_LEVELS,
-      orgEmployees:      (patchedEmployees.length > 0 ? patchedEmployees : SEED_ORG_EMPLOYEES),
+      orgEmployees:      parsed.orgEmployees       || [],
       reportingLines:    parsed.reportingLines     || SEED_REPORTING_LINES,
       orgUnits:          parsed.orgUnits           || SEED_ORG_UNITS,
       positions:         parsed.positions          || SEED_POSITIONS,
       occupancies:       parsed.occupancies        || SEED_OCCUPANCIES,
       customFields:      parsed.customFields       || SEED_CUSTOM_FIELDS,
-      customFieldValues: parsed.customFieldValues  || SEED_CUSTOM_FIELD_VALUES,
+      customFieldValues: parsed.customFieldValues  || [],
       autoRules:         parsed.autoRules          || SEED_AUTO_RULES,
       autoRuleLogs:      parsed.autoRuleLogs       || [],
     };
   } catch {
     return {
-      hierarchyLevels: SEED_HIERARCHY_LEVELS, orgEmployees: SEED_ORG_EMPLOYEES,
+      hierarchyLevels: SEED_HIERARCHY_LEVELS, orgEmployees: [],
       reportingLines: SEED_REPORTING_LINES, orgUnits: SEED_ORG_UNITS,
       positions: SEED_POSITIONS, occupancies: SEED_OCCUPANCIES,
-      customFields: SEED_CUSTOM_FIELDS, customFieldValues: SEED_CUSTOM_FIELD_VALUES,
+      customFields: SEED_CUSTOM_FIELDS, customFieldValues: [],
       autoRules: SEED_AUTO_RULES, autoRuleLogs: [],
     };
   }

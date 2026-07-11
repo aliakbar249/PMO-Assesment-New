@@ -284,7 +284,6 @@ function EmployeeModal({ employee, levels, customFields, companies, onClose, onS
     if (!form.email.trim())        e.email         = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email';
     if (!form.levelId)             e.levelId       = 'Hierarchy level is required';
-    if (!form.organization.trim()) e.organization  = 'Company is required';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -365,7 +364,7 @@ function EmployeeModal({ employee, levels, customFields, companies, onClose, onS
 
               {/* Company */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Company <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Company</label>
                 <select value={form.organization} onChange={e => set('organization', e.target.value)}
                   className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-[#01A2B1] ${errors.organization ? 'border-red-400' : 'border-gray-300'}`}>
                   <option value="">— select company —</option>
@@ -1066,9 +1065,6 @@ export default function OrgEmployees() {
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500); };
 
   // On mount: load companies + company admins
-  // NOTE: we intentionally do NOT auto-purge employees that lack an organization —
-  // real employees added before the company field was mandatory must not be silently lost.
-  // The organization field backfill now runs in loadOrg() for seed records.
   useEffect(() => {
     getCompanies().then(cos => setCompanies((cos || []).filter(c => c.active)));
     getAllCompanyAdmins().then(admins => setCompanyAdmins(admins || []));
@@ -1088,7 +1084,8 @@ export default function OrgEmployees() {
         || emp.city?.toLowerCase().includes(q)
         || emp.division?.toLowerCase().includes(q);
       const matchLevel  = !levelFilter  || emp.levelId  === levelFilter;
-      const matchStatus = !statusFilter || statusFilter === 'all' || emp.status === statusFilter;
+      const empStatus = emp.status || 'active'; // treat missing status as active
+      const matchStatus = !statusFilter || statusFilter === 'all' || empStatus === statusFilter;
       return matchSearch && matchLevel && matchStatus;
     });
   }, [employees, search, levelFilter, statusFilter]);
